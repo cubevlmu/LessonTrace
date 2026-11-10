@@ -48,6 +48,17 @@ jobs:
           docker inspect --format '{{.State.OOMKilled}}' lessontrace-smoke | grep '^false$'
           docker image inspect "$IMAGE" --format '{{.Size}}' > image-size-bytes.txt
           docker stats --no-stream lessontrace-smoke > container-stats.txt
+      - name: Verify Alpine gateway and write boundaries
+        run: |
+          set -eu
+          docker network create lessontrace-ci
+          docker network connect --alias api lessontrace-ci lessontrace-smoke
+          docker run -d --name lessontrace-proxy --network lessontrace-ci -p 127.0.0.1:8788:8080 -v "$PWD/deploy/nginx.release.conf:/etc/nginx/conf.d/default.conf:ro" -v "$PWD/deploy/judge-guide.html:/usr/share/nginx/html/judge-guide.html:ro" nginx:stable-alpine
+          docker exec lessontrace-proxy nginx -t
+          curl --retry 10 --retry-connrefused --retry-delay 1 --fail http://127.0.0.1:8788/api/context/health
+          curl --fail http://127.0.0.1:8788/judge-guide.html > /dev/null
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8788/api/context/analysis/jobs)" = 403
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8788/api/context/fusion/ask)" = 401
       - name: Publish verified image
         env:
           IMAGE: ghcr.io/cubevlmu/lessontrace:${{ github.sha }}

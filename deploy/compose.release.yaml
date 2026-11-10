@@ -1,0 +1,35 @@
+name: lessontrace-judge
+services:
+  api:
+    image: ${LESSONTRACE_IMAGE:?Set LESSONTRACE_IMAGE in .env}
+    environment:
+      INTICLASS_PROFILE: product
+      INTICLASS_EXTERNAL_WORKER: '1'
+      INTICLASS_SECURE_COOKIE: '1'
+      INTICLASS_PUBLIC_ORIGIN: ${INTICLASS_PUBLIC_ORIGIN:?Set HTTPS origin in .env}
+      INTICLASS_TEXT_PROVIDER: deepseek
+      INTICLASS_TEXT_MODEL: deepseek-flash
+      INTICLASS_VLM_MODEL: ''
+      INTICLASS_VLM_TIMEOUT: '5'
+    volumes: ['./lesson_trace_data:/app/lesson_trace_data']
+    expose: ['8787']
+    mem_limit: 2048m
+    cpus: 2.5
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD','python','-c',"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/api/context/health',timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+  proxy:
+    image: nginx:stable-alpine
+    ports: ['127.0.0.1:8788:8080']
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./judge-guide.html:/usr/share/nginx/html/judge-guide.html:ro
+    depends_on:
+      api: {condition: service_healthy}
+    mem_limit: 128m
+    cpus: 0.5
+    restart: unless-stopped
