@@ -1,0 +1,23 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.10.0+cpu
+torchvision==0.25.0+cpu
+ultralytics==8.3.251
+onnxruntime>=1.20,<2
+av>=14,<17
+numpy>=1.26,<3
+scipy>=1.13,<2
+lap>=0.5.12
+opencv-python-headless>=4.10,<6
+pydantic>=2.6,<3
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+httpx>=0.28,<1
+cryptography>=43
+pillow>=10
+python-multipart>=0.0.18
+filelock>=3.13
+psutil>=7
+pypdf>=5
+python-pptx>=1
+openpyxl>=3.1
+pyyaml>=6

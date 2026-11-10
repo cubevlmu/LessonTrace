@@ -1,0 +1,27 @@
+﻿import {useEffect,useState} from 'react';
+import {z} from 'zod';
+import {request} from '../api/client';
+import {getReport} from '../api/review';
+import {useSession} from '../state/session';
+import {actionLabel,stateLabel,fmt,type VisualItem} from '../models/view';
+const historySchema=z.array(z.object({review_id:z.string(),status:z.string(),actor:z.string(),created_at:z.string(),data:z.record(z.unknown())}).passthrough());
+export function CorrectionPanel({item}:{item?:VisualItem}){
+ const s=useSession();const correctionId=item?.eventId||(item?.kind==='window'?item.id:undefined);const [category,setCategory]=useState('unknown'),[tid,setTid]=useState(''),[start,setStart]=useState(''),[end,setEnd]=useState(''),[action,setAction]=useState(''),[reason,setReason]=useState(''),[indices,setIndices]=useState(''),[decision,setDecision]=useState('uncertain'),[attest,setAttest]=useState(false),[history,setHistory]=useState<z.infer<typeof historySchema>>([]),[busy,setBusy]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');
+ async function load(){if(correctionId)setHistory(await request('corrections?event_id='+encodeURIComponent(correctionId!),historySchema));}
+ async function sync(){if(s.data.job)await s.loadJob(s.data.job.job_id);if(s.data.report)s.setReport(await getReport(s.data.report.report_id));}
+ useEffect(()=>{setHistory([]);setAttest(false);setMessage('');setError('');setCategory(item?.category||'unknown');setTid(item?String(item.trackId):'');setStart(item?String(item.localStart):'');setEnd(item?String(item.localEnd):'');setIndices('');setReason('');setAction('');if(correctionId)void load().catch(e=>setError(String(e)));},[item?.id]);
+ async function task(fn:()=>Promise<void>){setBusy(true);setError('');try{await fn();}catch(e){setError(String(e));}finally{setBusy(false);}}
+ if(!item)return <div className="card__body"><h3>先选择一条观察</h3><p>点击时间线上的动作或下方画面观察记录，再在这里修改。当前人物没有已保存的观察时，可使用“扩展此人物的连续动作分析”。</p></div>;
+ return <section className="card"><div className="card__head"><h2 className="card__title">教师纠错</h2></div><div className="card__body"><p>AI建议：{actionLabel[item.category]} · {stateLabel[item.state]||item.state}</p>{error&&<p className="upload__error" role="alert">{error}</p>}{message&&<p role="status">{message}</p>}
+ {s.canWrite&&<form className="product-actions" onSubmit={e=>{e.preventDefault();void task(async()=>{const frames=indices.split(/[,，\s]+/).filter(Boolean).map(Number);if(frames.some(x=>!Number.isInteger(x)||x<0))throw Error('请选择实际查看过的证据画面');const offset=s.data.scope?.start||0;await request('corrections',z.object({review_id:z.string()}).passthrough(),{event_id:correctionId,decision,corrected_category:category,track_id:Number(tid),start:Number(start)+offset,end:Number(end)+offset,observable_action:action,reason,evidence_frames:frames,reviewed:attest});await load();await sync();setAttest(false);setMessage('纠错已保存。时间线和后续问答使用最新复核，旧报告需重算');});}}>
+ <label>教师判断<select aria-label="教师判断" value={decision} onChange={e=>setDecision(e.target.value)}><option value="uncertain">无法判断</option><option value="confirmed">确认或修正行为</option><option value="rejected">删除不适用候选（原记录保留）</option></select></label>
+ <label>修正类别<select aria-label="修正类别" value={category} onChange={e=>setCategory(e.target.value)}>{Object.entries(actionLabel).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label>
+ <label>行为执行轨迹<select aria-label="修正轨迹" value={tid} onChange={e=>setTid(e.target.value)}>{s.data.tracks.map(t=><option key={t.track_id} value={t.track_id}>匿名轨迹 {t.track_id}</option>)}</select></label>
+ <label>开始时间（视频秒）<input type="number" step="any" min="0" required value={start} onChange={e=>setStart(e.target.value)}/></label><label>结束时间（视频秒）<input type="number" step="any" min="0" required value={end} onChange={e=>setEnd(e.target.value)}/></label>
+ <fieldset><legend>勾选您实际查看过的画面</legend>{item.frames.map(f=><label key={f.frame_id}><input type="checkbox" checked={indices.split(/[,，\s]+/).filter(Boolean).includes(String(f.frame_index))} onChange={e=>setIndices(value=>{const values=value.split(/[,，\s]+/).filter(Boolean);return (e.target.checked?Array.from(new Set([...values,String(f.frame_index)])):values.filter(v=>v!==String(f.frame_index))).join(',');})}/>{fmt(f.local_time)}</label>)}</fieldset>
+ <details><summary>高级：直接输入帧序号</summary><label>实际看过的帧序号<input aria-label="纠错帧序号" value={indices} onChange={e=>setIndices(e.target.value)} placeholder="例如：10, 20"/></label></details>
+ <label>实际可观察动作<textarea className="product-input" aria-label="纠错观察动作" required minLength={5} value={action} onChange={e=>setAction(e.target.value)}/></label><label>依据与限制<textarea className="product-input" required minLength={5} value={reason} onChange={e=>setReason(e.target.value)}/></label>
+ <label><input type="checkbox" checked={attest} onChange={e=>setAttest(e.target.checked)}/>我已亲自核对所选画面、人物、动作和时间区间</label><button className="btn btn--primary" disabled={busy||!attest||!indices.trim()}>保存纠错</button></form>}
+ {history.map(h=><div key={h.review_id}><p>{h.status} · {h.created_at} · 审核人 {h.actor}</p>{s.canWrite&&h.status!=='revoked'&&<button className="btn btn--ghost" disabled={busy} onClick={()=>{const reason=window.prompt('撤销原因（至少5字）');if(reason)void task(async()=>{await request(`corrections/${h.review_id}/revoke`,z.object({status:z.string()}).passthrough(),{reason});await load();setMessage('人工修改已撤销，旧报告需重算');});}}>撤销此修改</button>}</div>)}
+ </div></section>;
+}

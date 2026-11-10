@@ -1,0 +1,13 @@
+import {z} from 'zod';
+import {request} from './client';
+export const materialNames:Record<string,string>={teacher_plan:'教案与教学计划',activity_schedule:'课堂活动安排',assignment:'作业要求',student_work:'学生作业',graded_work:'作业批改',assessment_result:'测评记录',learning_material:'学习资料',rubric:'评价标准',teacher_observation:'教师观察',teacher_note:'教师补充说明',classroom_memory:'课堂记忆',course_info:'课程信息',learning_goals:'教学目标',other_material:'其他资料'};
+export const materialStatus:Record<string,string>={parsed:'已提取文字',parsed_teacher_transcription:'教师已补录文字',requires_ocr:'待补录扫描文字',partial_requires_ocr:'部分页面待补录',requires_transcription:'图片待补录文字',no_extractable_text:'未取得可读文字'};
+export const scopeSchema=z.object({run_id:z.string().nullable().optional(),classroom_id:z.string().nullable().optional(),subject_id:z.string().nullable().optional(),track_id:z.number().nullable().optional()}).passthrough();
+export const materialSchema=z.object({document_id:z.string(),title:z.string(),source_type:z.string(),status:z.string(),file_type:z.string().optional(),is_example:z.union([z.boolean(),z.number()]).optional(),created_at:z.string().optional(),scope:scopeSchema.optional()}).passthrough();
+export const detailSchema=materialSchema.extend({passages:z.array(z.object({passage_id:z.string(),content:z.string(),page_or_slide:z.number().nullable(),extraction_status:z.string().optional()}).passthrough())});
+export type Material=z.infer<typeof materialSchema>;
+export const listMaterials=()=>request('documents',z.array(materialSchema));
+export const getMaterial=(id:string)=>request('documents/'+encodeURIComponent(id),detailSchema);
+export const memories=(run:string)=>request('classroom-memory?run_id='+encodeURIComponent(run),z.array(detailSchema));
+export const remember=(body:Record<string,unknown>)=>request('classroom-memory',z.object({document_id:z.string(),source_kind:z.string(),not_model_training:z.boolean()}).passthrough(),body);
+export const deleteMaterial=(id:string)=>request('documents/'+encodeURIComponent(id),z.record(z.unknown()),undefined,'DELETE');

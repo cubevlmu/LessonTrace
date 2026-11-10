@@ -1,0 +1,11 @@
+# Isolated inference environment; install torch/torchvision CUDA wheels separately.
+ultralytics==8.3.251
+av>=14,<17
+lap>=0.5.12
+scipy>=1.13
+filelock>=3.13
+-r base.txt
+pydantic>=2.6,<3
+opencv-python==4.14.0.94
+openpyxl>=3.1,<4
+pillow>=10

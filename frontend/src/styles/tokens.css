@@ -1,0 +1,255 @@
+/* ==========================================================================
+   课迹 LessonTrace — 设计令牌
+   冷白底 + 深墨蓝主色；证据等级用一套独立色阶编码，避免与主色混淆。
+   ========================================================================== */
+
+:root {
+  /* ---- 中性 ---- */
+  --bg: #f2f6fa;
+  --surface: #ffffff;
+  --surface-sunken: #e9eff6;
+  --surface-glass: rgba(255, 255, 255, 0.82);
+
+  --ink: #0b1a29;
+  --ink-2: #22374b;
+  --muted: #4f6275;
+  --faint: #5a6b7f;
+
+  --line: #d9e2ec;
+  --line-strong: #bccbdb;
+
+  /* ---- 主色 ---- */
+  --primary: #123a5e;
+  --primary-hover: #0c2b47;
+  --primary-soft: #e4edf7;
+  --primary-line: #b9cee3;
+
+  /* ---- 强调（追溯 / 跳转） ---- */
+  --accent: #0a7183;
+  --accent-soft: #e0f0f2;
+
+  /* ---- 结论状态 ---- */
+  --ok: #1b6b46;
+  --ok-soft: #e2f1e9;
+  --warn: #855205;
+  --warn-soft: #f7eddb;
+  --bad: #a13239;
+  --bad-soft: #f8e4e5;
+  --unknown: #5f6d7c;
+  --unknown-soft: #eaeef3;
+
+  /* ---- 证据等级 E0–E4 ---- */
+  --ev0: #7a8794;
+  --ev1: #a26a13;
+  --ev2: #2a5f9e;
+  --ev3: #0d6f76;
+  --ev4: #1b6b46;
+
+  /* ---- 语义面 / 文本（主题切换只改这些） ---- */
+  --surface-2: #fbfdff;
+  --surface-3: #f7fafc;
+
+  --primary-fg: #17405f;
+  --on-solid: #ffffff;
+
+  --ok-fg: #14523a;
+  --ok-line: #b8ddc9;
+  --warn-fg: #6f4505;
+  --warn-line: #e8d2ac;
+  --bad-fg: #7c272d;
+  --bad-line: #e3bec0;
+  --unknown-fg: #4a5866;
+  --unknown-line: #d3dce6;
+
+  /* 证据等级：fg 文字 / bg 浅底 / line 描边 */
+  --ev0-fg: #5a6672;
+  --ev0-bg: #eef1f4;
+  --ev0-line: #d6dee6;
+  --ev1-fg: #7d4b05;
+  --ev1-bg: #f8eeda;
+  --ev1-line: #ecd6ae;
+  --ev2-fg: #1c4878;
+  --ev2-bg: #e3ecf7;
+  --ev2-line: #c6d8ec;
+  --ev3-fg: #085b60;
+  --ev3-bg: #dcefee;
+  --ev3-line: #b3dcd9;
+  --ev4-fg: #145237;
+  --ev4-bg: #dcefe4;
+  --ev4-line: #b2dcc6;
+
+  /* ---- 字体 ---- */  --font-sans: "Inter", "PingFang SC", "HarmonyOS Sans SC", "MiSans",
+    "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  --font-mono: "SFMono-Regular", "JetBrains Mono", Consolas, "Courier New", monospace;
+
+  /* ---- 字号阶梯 ---- */
+  --fs-11: 12px;
+  --fs-12: 12px;
+  --fs-13: 13px;
+  --fs-14: 14px;
+  --fs-16: 16px;
+  --fs-20: 20px;
+  --fs-26: 26px;
+  --fs-34: 34px;
+
+  /* ---- 间距（4 的倍数） ---- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+
+  /* ---- 形状 ---- */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+
+  /* ---- 阴影 ---- */
+  --shadow-xs: 0 1px 2px rgba(11, 26, 41, 0.06);
+  --shadow-sm: 0 2px 6px -2px rgba(11, 26, 41, 0.12);
+  --shadow-md: 0 16px 32px -22px rgba(11, 26, 41, 0.45);
+  --shadow-pop: 0 18px 40px -18px rgba(11, 26, 41, 0.4);
+
+  /* ---- 布局 ---- */
+  --rail-w: 216px;
+  --topbar-h: 56px;
+  --panel-w: 372px;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* ==========================================================================
+   夜间模式：只改语义令牌，不改任何组件的尺寸与结构
+   ========================================================================== */
+:root {
+  color-scheme: light;
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg: #0b131b;
+  --surface: #121c26;
+  --surface-2: #16212c;
+  --surface-3: #0f1922;
+  --surface-sunken: #0a1118;
+  --surface-glass: rgba(18, 28, 38, 0.86);
+
+  --ink: #e9eff6;
+  --ink-2: #c6d3e0;
+  --muted: #9aabbb;
+  --faint: #8d9eb0;
+
+  --line: #24333f;
+  --line-strong: #35485a;
+
+  --primary: #2f6ea6;
+  --primary-hover: #3a83c2;
+  --primary-soft: #16283a;
+  --primary-line: #2b455c;
+  --primary-fg: #a8cdf0;
+  --on-solid: #0a141d;
+
+  --accent: #4fb6c7;
+  --accent-soft: #0e2a30;
+
+  --ok: #5fbf92;
+  --ok-soft: #10291f;
+  --ok-fg: #8ed8b2;
+  --ok-line: #24503c;
+  --warn: #d8a75c;
+  --warn-soft: #2a2113;
+  --warn-fg: #f0c98a;
+  --warn-line: #574323;
+  --bad: #e28286;
+  --bad-soft: #2c1719;
+  --bad-fg: #f0a3a6;
+  --bad-line: #5c2b2f;
+  --unknown: #9dabb9;
+  --unknown-soft: #1b2530;
+  --unknown-fg: #bcc9d6;
+  --unknown-line: #2e3d4b;
+
+  --ev0: #8b98a5;
+  --ev0-fg: #c3ced9;
+  --ev0-bg: #1c2731;
+  --ev0-line: #2f3d4a;
+  --ev1: #d1a05a;
+  --ev1-fg: #f0c88f;
+  --ev1-bg: #2b2214;
+  --ev1-line: #584327;
+  --ev2: #6fa3dd;
+  --ev2-fg: #a9cbf2;
+  --ev2-bg: #16283c;
+  --ev2-line: #2c4a6a;
+  --ev3: #56b6b4;
+  --ev3-fg: #8fd9d6;
+  --ev3-bg: #0f2b2b;
+  --ev3-line: #245050;
+  --ev4: #5fbf92;
+  --ev4-fg: #8ed8b2;
+  --ev4-bg: #10291f;
+  --ev4-line: #24503c;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-sm: 0 2px 8px -2px rgba(0, 0, 0, 0.6);
+  --shadow-md: 0 18px 36px -24px rgba(0, 0, 0, 0.9);
+  --shadow-pop: 0 20px 44px -18px rgba(0, 0, 0, 0.85);
+}
+
+/* 报告是「要打印的纸」：夜间模式里也保持白纸，避免深色底上印出黑字 */
+[data-theme='dark'] .paper {
+  /* 报告页在夜间模式里仍然是一张白纸：这里把整套浅色令牌就地覆盖回来 */
+  color: #0b1a29;
+  color-scheme: light;
+  --surface: #ffffff;
+  --surface-2: #fbfdff;
+  --surface-3: #f7fafc;
+  --surface-sunken: #e9eff6;
+  --ink: #0b1a29;
+  --ink-2: #22374b;
+  --muted: #4f6275;
+  --faint: #5a6b7f;
+  --line: #d9e2ec;
+  --line-strong: #bccbdb;
+  --primary: #123a5e;
+  --primary-soft: #e4edf7;
+  --primary-line: #b9cee3;
+  --primary-fg: #17405f;
+  --on-solid: #ffffff;
+  --accent: #0a7183;
+  --accent-soft: #e0f0f2;
+  --ok: #1b6b46;
+  --ok-fg: #14523a;
+  --ok-soft: #e2f1e9;
+  --warn: #855205;
+  --warn-fg: #6f4505;
+  --warn-soft: #f7eddb;
+  --bad: #a13239;
+  --bad-fg: #7c272d;
+  --bad-soft: #f8e4e5;
+  --unknown: #5f6d7c;
+  --unknown-fg: #4a5866;
+  --unknown-soft: #eaeef3;
+  --ev0: #7a8794;
+  --ev0-fg: #5a6672;
+  --ev0-bg: #eef1f4;
+  --ev1: #a26a13;
+  --ev1-fg: #7d4b05;
+  --ev1-bg: #f8eeda;
+  --ev2: #2a5f9e;
+  --ev2-fg: #1c4878;
+  --ev2-bg: #e3ecf7;
+  --ev3: #0d6f76;
+  --ev3-fg: #085b60;
+  --ev3-bg: #dcefee;
+  --ev4: #1b6b46;
+  --ev4-fg: #145237;
+  --ev4-bg: #dcefe4;
+}

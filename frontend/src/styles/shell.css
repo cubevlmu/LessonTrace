@@ -1,0 +1,372 @@
+/* ==========================================================================
+   应用外壳：顶栏 + 左侧导航
+   ========================================================================== */
+
+.shell {
+  display: grid;
+  grid-template-columns: var(--rail-w) minmax(0, 1fr);
+  grid-template-rows: var(--topbar-h) minmax(0, 1fr);
+  height: 100vh;
+  background: var(--bg);
+}
+
+/* ---------- 顶栏 ---------- */
+.topbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  padding: 0 var(--sp-5) 0 var(--sp-4);
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+  position: relative;
+  z-index: 20;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-right: var(--sp-4);
+  border-right: 1px solid var(--line);
+  height: 100%;
+  min-width: calc(var(--rail-w) - var(--sp-4) - 1px);
+}
+
+.brand__mark {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--primary);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.brand__name {
+  font-size: var(--fs-14);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+}
+
+.brand__sub {
+  font-size: var(--fs-11);
+  color: var(--faint);
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+}
+
+/* 当前课次 */
+.session-pill {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 34px;
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: var(--fs-12);
+  transition: border-color 160ms var(--ease);
+}
+
+.session-pill:hover {
+  border-color: var(--line-strong);
+}
+
+.session-pill__id {
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}
+
+.topbar__spacer {
+  flex: 1;
+}
+
+.topbar__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  font-size: var(--fs-12);
+  color: var(--muted);
+}
+
+.anon-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  background: var(--ok-soft);
+  color: var(--ok);
+  font-size: var(--fs-11);
+  font-weight: 600;
+}
+
+.avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--primary-soft);
+  color: var(--primary-fg);
+  display: grid;
+  place-items: center;
+  font-size: var(--fs-11);
+  font-weight: 600;
+}
+
+/* ---------- 左侧导航 ---------- */
+.rail {
+  border-right: 1px solid var(--line);
+  background: var(--surface);
+  padding: var(--sp-4) var(--sp-3) var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.rail__group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rail__label {
+  padding: 0 var(--sp-3) var(--sp-2);
+  font-size: var(--fs-11);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--faint);
+}
+
+.navitem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-sm);
+  color: var(--ink-2);
+  font-size: var(--fs-13);
+  position: relative;
+  transition: background-color 160ms var(--ease), color 160ms var(--ease);
+}
+
+.navitem:hover {
+  background: var(--surface-sunken);
+}
+
+.navitem__icon {
+  color: var(--faint);
+  flex: none;
+}
+
+.navitem__count {
+  margin-left: auto;
+  font-size: var(--fs-11);
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.navitem[aria-current="page"] {
+  background: var(--primary-soft);
+  color: var(--primary-fg);
+  font-weight: 600;
+}
+
+.navitem[aria-current="page"] .navitem__icon {
+  color: var(--primary-fg);
+}
+
+.navitem[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  top: 9px;
+  bottom: 9px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--primary);
+}
+
+.rail__foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.rail-note {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: var(--sp-3);
+  background: var(--surface-2);
+  font-size: var(--fs-11);
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.rail-note__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-2);
+  font-weight: 600;
+  font-size: var(--fs-11);
+  margin-bottom: 4px;
+}
+
+/* 精简版：去掉边框和底色，只留文字，避免侧栏像一摞卡片 */
+.rail-note--tight {
+  border: 0;
+  background: none;
+  padding: 0 var(--sp-3);
+}
+
+/* ---------- 主内容 ---------- */
+.main {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--sp-5);
+}
+
+.main--flush {
+  padding: 0;
+}
+
+@media (max-width: 1180px) {
+  .shell {
+    --rail-w: 64px;
+  }
+
+  .rail {
+    padding: var(--sp-3) var(--sp-2);
+    align-items: stretch;
+  }
+
+  .rail__label,
+  .navitem__text,
+  .navitem__count,
+  .rail-note,
+  .brand__name,
+  .brand__sub {
+    display: none;
+  }
+
+  .navitem {
+    justify-content: center;
+    padding: 0;
+  }
+
+  .brand {
+    min-width: 0;
+    border-right: 0;
+  }
+}
+
+/* ---------- 窄屏：外壳改为顶栏 + 横向导航条 ---------- */
+@media (max-width: 900px) {
+  .shell {
+    --rail-w: 0px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: var(--topbar-h) auto minmax(0, 1fr);
+    height: auto;
+    min-height: 100vh;
+  }
+
+  .topbar {
+    gap: var(--sp-2);
+    padding: 0 var(--sp-3);
+  }
+
+  .brand {
+    border-right: 0;
+    padding-right: 0;
+  }
+
+  .brand__mark {
+    width: 24px;
+    height: 24px;
+  }
+
+  /* 窄屏只留主题切换，脱敏说明让位给课次胶囊 */
+  .topbar__meta {
+    display: flex;
+    flex: none;
+  }
+
+  /* 课次胶囊在窄屏放不下「课程 · 时段 + 编号」，优先保课程与时段 */
+  .session-pill__id {
+    display: none;
+  }
+
+  .topbar__meta .anon-chip {
+    display: none;
+  }
+
+  .session-pill {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .session-pill > * {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .rail {
+    grid-row: 2;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: 6px var(--sp-3);
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .rail__group {
+    flex-direction: row;
+    gap: var(--sp-2);
+  }
+
+  .rail__foot,
+  .rail__label,
+  .rail-note {
+    display: none;
+  }
+
+  .navitem {
+    flex: none;
+    height: 32px;
+    padding: 0 10px;
+    gap: 6px;
+  }
+
+  .navitem__text {
+    display: inline;
+  }
+
+  .navitem[aria-current="page"]::before {
+    display: none;
+  }
+
+  .main {
+    grid-row: 3;
+    height: auto;
+    overflow: visible;
+    padding: var(--sp-3);
+  }
+}

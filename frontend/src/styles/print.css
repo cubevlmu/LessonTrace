@@ -1,0 +1,83 @@
+/* ==========================================================================
+   打印 / 另存为 PDF：只保留报告纸面本身
+   ========================================================================== */
+
+@media print {
+  @page {
+    size: A4;
+    margin: 14mm 13mm;
+  }
+
+  html,
+  body {
+    background: #fff;
+  }
+
+  .shell {
+    display: block;
+    height: auto;
+    min-height: 0;
+  }
+
+  .topbar,
+  .rail,
+  .toast,
+  .page__head,
+  .report-side {
+    display: none !important;
+  }
+
+  .main {
+    padding: 0;
+    height: auto;
+    overflow: visible;
+  }
+
+  .page,
+  .page--report {
+    padding: 0;
+    gap: 0;
+    height: auto;
+  }
+
+  .report-grid {
+    display: block;
+  }
+
+  .paper {
+    max-width: none;
+    width: auto;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .paper__p,
+  .paper__claims li,
+  .paper__tbl tr,
+  .paper__meta tr,
+  .dist__row {
+    break-inside: avoid;
+  }
+
+  .paper__h3 {
+    break-after: avoid;
+  }
+
+  .paper a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .paper__ref {
+    border: 0;
+    padding: 0;
+    background: none;
+  }
+
+  .paper__claims li {
+    border: 1px solid #d9e2ec;
+  }
+}

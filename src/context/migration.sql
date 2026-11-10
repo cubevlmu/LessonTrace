@@ -1,0 +1,16 @@
+PRAGMA foreign_keys=ON;
+CREATE TABLE IF NOT EXISTS context_meta(key TEXT PRIMARY KEY,value INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS context_document_scope(document_id TEXT PRIMARY KEY REFERENCES context_documents(document_id),run_id TEXT,classroom_id TEXT,subject_id TEXT,track_id INTEGER);
+INSERT OR IGNORE INTO context_meta VALUES('revision',0);
+CREATE TABLE IF NOT EXISTS context_documents(document_id TEXT PRIMARY KEY,owner TEXT NOT NULL,source_type TEXT NOT NULL,title TEXT NOT NULL,filename TEXT NOT NULL,file_type TEXT NOT NULL,file_hash TEXT NOT NULL,parser_version TEXT NOT NULL,uploaded_by TEXT NOT NULL,created_at TEXT NOT NULL,status TEXT NOT NULL,is_example INTEGER NOT NULL,version INTEGER NOT NULL,original BLOB,canonical_text TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS context_owner ON context_documents(owner,status,source_type);
+CREATE TABLE IF NOT EXISTS document_grants(document_id TEXT NOT NULL REFERENCES context_documents(document_id),actor TEXT NOT NULL,PRIMARY KEY(document_id,actor));
+CREATE TABLE IF NOT EXISTS context_passages(passage_id TEXT PRIMARY KEY,document_id TEXT NOT NULL REFERENCES context_documents(document_id),content TEXT NOT NULL,page_or_slide INTEGER,source_start INTEGER NOT NULL,source_end INTEGER NOT NULL,provenance TEXT NOT NULL,extraction_status TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS passages_document ON context_passages(document_id,source_start);
+CREATE VIRTUAL TABLE IF NOT EXISTS context_fts USING fts5(passage_id UNINDEXED,terms,tokenize='unicode61');
+CREATE TABLE IF NOT EXISTS teaching_activities(activity_id TEXT PRIMARY KEY,document_id TEXT NOT NULL REFERENCES context_documents(document_id),source_passage_id TEXT NOT NULL REFERENCES context_passages(passage_id),activity_type TEXT NOT NULL,description TEXT NOT NULL,start_seconds REAL,end_seconds REAL,time_reference TEXT NOT NULL,status TEXT NOT NULL,version INTEGER NOT NULL,revoked INTEGER NOT NULL DEFAULT 0,action_claims TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS context_video_links(link_id TEXT PRIMARY KEY,lesson_id TEXT NOT NULL,document_id TEXT NOT NULL REFERENCES context_documents(document_id),clip_id TEXT NOT NULL,time_reference TEXT NOT NULL,text_anchor REAL NOT NULL,video_global_anchor REAL NOT NULL,source_sha256 TEXT NOT NULL,basis TEXT NOT NULL,confirmed_by TEXT NOT NULL,created_at TEXT NOT NULL,status TEXT NOT NULL,version INTEGER NOT NULL,supersedes TEXT REFERENCES context_video_links(link_id));
+CREATE INDEX IF NOT EXISTS context_link_scope ON context_video_links(document_id,clip_id,status,lesson_id);
+CREATE TABLE IF NOT EXISTS context_audit(audit_id TEXT PRIMARY KEY,object_id TEXT NOT NULL,actor TEXT NOT NULL,operation TEXT NOT NULL,created_at TEXT NOT NULL,payload TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS knowledge_rules(rule_id TEXT PRIMARY KEY,category TEXT NOT NULL,version TEXT NOT NULL,payload TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS context_analyses(analysis_id TEXT PRIMARY KEY,owner TEXT NOT NULL,created_at TEXT NOT NULL,revision INTEGER NOT NULL,external_version TEXT NOT NULL,request TEXT NOT NULL,result TEXT NOT NULL);

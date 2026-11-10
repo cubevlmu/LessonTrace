@@ -1,0 +1,16 @@
+lesson_trace_data/
+data/
+outputs/
+artifacts/
+*.db
+*.sqlite*
+*.key
+*.env
+*.private.json
+*.zip
+*.tar.gz
+.venv*/
+__pycache__/
+frontend/node_modules/
+frontend/dist/
+deploy/tls/

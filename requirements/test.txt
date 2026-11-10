@@ -1,0 +1,5 @@
+-r tracking.txt
+pytest>=8
+pandas>=2
+tqdm>=4.66
+playwright==1.63.0

@@ -1,0 +1,6 @@
+# Local replay, human annotation and evaluation; no training or GPU runtime.
+-r base.txt
+pydantic>=2.6,<3
+opencv-python-headless>=4.8,<5
+openpyxl>=3.1,<4
+pillow>=10

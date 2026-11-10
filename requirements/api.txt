@@ -1,0 +1,16 @@
+# HTTP/evidence/identity runtime: no torch, training or learned tracking dependency.
+numpy>=1.26,<3
+av>=14,<17
+opencv-python-headless>=4.10,<6
+pydantic>=2.6,<3
+fastapi>=0.115,<1
+uvicorn>=0.30,<1
+httpx>=0.28,<1
+cryptography>=43
+pillow>=10
+python-multipart>=0.0.18
+filelock>=3.13
+psutil>=7
+pypdf>=5
+python-pptx>=1
+pyyaml>=6

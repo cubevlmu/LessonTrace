@@ -1,0 +1,75 @@
+name: Build and verify judge image
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: container-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build API only (no inference weights)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/Dockerfile
+          target: api
+          platforms: linux/amd64
+          load: true
+          tags: ghcr.io/cubevlmu/lessontrace:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.source=https://github.com/cubevlmu/LessonTrace
+            org.opencontainers.image.revision=${{ github.sha }}
+      - name: Verify actual running container
+        env:
+          IMAGE: ghcr.io/cubevlmu/lessontrace:${{ github.sha }}
+        run: |
+          set -eu
+          password=$(openssl rand -hex 24)
+          echo "::add-mask::$password"
+          docker run -d --name lessontrace-smoke --memory 2g --cpus 2.5 -e INTICLASS_ADMIN_USER=ciadmin -e INTICLASS_ADMIN_PASSWORD="$password" -e INTICLASS_SECURE_COOKIE=0 "$IMAGE"
+          docker exec lessontrace-smoke python scripts/container_smoke.py
+          docker inspect --format '{{.State.OOMKilled}}' lessontrace-smoke | grep '^false$'
+          docker image inspect "$IMAGE" --format '{{.Size}}' > image-size-bytes.txt
+          docker stats --no-stream lessontrace-smoke > container-stats.txt
+      - name: Publish verified image
+        env:
+          IMAGE: ghcr.io/cubevlmu/lessontrace:${{ github.sha }}
+        run: |
+          set -eu
+          docker push "$IMAGE"
+          docker tag "$IMAGE" ghcr.io/cubevlmu/lessontrace:latest
+          docker push ghcr.io/cubevlmu/lessontrace:latest
+          docker save "$IMAGE" | gzip -1 > lessontrace-image-amd64.tar.gz
+          sha256sum lessontrace-image-amd64.tar.gz > lessontrace-image-amd64.tar.gz.sha256
+          echo "Image: $IMAGE" >> "$GITHUB_STEP_SUMMARY"
+          echo "Offline image is available in the workflow artifact." >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lessontrace-image-amd64
+          path: |
+            lessontrace-image-amd64.tar.gz
+            lessontrace-image-amd64.tar.gz.sha256
+            image-size-bytes.txt
+            container-stats.txt
+          compression-level: 0
+          retention-days: 14
+      - name: Logs on failure
+        if: failure()
+        run: docker logs lessontrace-smoke 2>&1 || true
