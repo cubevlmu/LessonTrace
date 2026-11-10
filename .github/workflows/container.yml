@@ -43,7 +43,7 @@ jobs:
           set -eu
           password=$(openssl rand -hex 24)
           echo "::add-mask::$password"
-          docker run -d --name lessontrace-smoke --memory 2g --cpus 2.5 -e INTICLASS_ADMIN_USER=ciadmin -e INTICLASS_ADMIN_PASSWORD="$password" -e INTICLASS_SECURE_COOKIE=0 "$IMAGE"
+          docker run -d --name lessontrace-smoke --memory 2g --cpus 2.5 -e INTICLASS_ADMIN_USER=ciadmin -e INTICLASS_ADMIN_PASSWORD="$password" -e INTICLASS_SECURE_COOKIE=0 -e INTICLASS_ALLOW_HTTP=1 -e INTICLASS_PUBLIC_ORIGIN=http://127.0.0.1 "$IMAGE"
           docker exec lessontrace-smoke python scripts/container_smoke.py
           docker inspect --format '{{.State.OOMKilled}}' lessontrace-smoke | grep '^false$'
           docker image inspect "$IMAGE" --format '{{.Size}}' > image-size-bytes.txt

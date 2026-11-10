@@ -43,7 +43,8 @@ def create_context_app(runtime,private_dir=None,identity_dir='data/identity_priv
         hosts={'127.0.0.1','localhost','::1','testserver'}
         if public:
             configured=urlsplit(public)
-            if configured.scheme!='https' or configured.path not in {'','/'} or configured.username or configured.password:raise ValueError('invalid_public_https_origin')
+            http_enabled=os.getenv('INTICLASS_ALLOW_HTTP','0')=='1' and os.getenv('INTICLASS_SECURE_COOKIE')=='0'
+            if configured.scheme not in ({'http','https'} if http_enabled else {'https'}) or not configured.hostname or configured.path not in {'','/'} or configured.username or configured.password or configured.query or configured.fragment:raise ValueError('invalid_public_https_origin')
             hosts.add(configured.hostname)
         if request.url.hostname not in hosts:return Response('configured_host_required',403)
         origin=request.headers.get('origin')
