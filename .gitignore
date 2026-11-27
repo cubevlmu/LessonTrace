@@ -58,8 +58,8 @@ Thumbs.db
 data/validation_private/
 data/analysis_private/
 data/frontend_private/
-frontend/node_modules/
-frontend/dist/
+/frontend/node_modules
+/frontend/dist
 frontend/.env*
 frontend/.npmrc
 frontend/.pnpm-store/
