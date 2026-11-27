@@ -3,13 +3,21 @@ from .evidence import version
 
 CONFLICTS={'teacher_visual_conflict','candidate_teacher_difference','human_attribution_conflict'}
 GLOBAL={'cognitive_overreach','identity_missing','missing_video_coverage','clip_not_complete_lesson'}
+LEARNING_MATERIALS={'student_work','graded_work','assessment_result','assignment','rubric','teacher_plan'}
 
 
 def evidence_relevance(e,plan):
     p=e['provenance'];kind=e['evidence_type'];reasons=[]
     selected_context=kind in {'teacher_plan','teacher_report'} and p.get('document_id') in plan.document_ids
     remembered=kind=='teacher_report' and p.get('source_kind')=='classroom_memory' and plan.use_classroom_memory
-    if kind not in plan.evidence_types and not((selected_context or remembered) and plan.intent!='cognitive_boundary'):return 0,['not_required_for_query_intent']
+    student_id=plan.roster_subject_id or plan.subject_id
+    learning_material=kind in {'teacher_plan','teacher_report'} and p.get('source_kind') in LEARNING_MATERIALS
+    material_student=(p.get('material_scope') or {}).get('subject_id')
+    if learning_material and student_id and material_student and material_student!=student_id:
+        return 0,['different_student_material']
+    prioritize_material=learning_material and plan.focus=='ordinary' and plan.intent!='cognitive_boundary' and (
+        plan.intent=='context_relation' or bool(student_id))
+    if kind not in plan.evidence_types and not((selected_context or remembered or prioritize_material) and plan.intent!='cognitive_boundary'):return 0,['not_required_for_query_intent']
     if plan.intent=='teaching_plan' and (kind=='teacher_report' or (kind=='teaching_activity' and p['activity_status']!='planned')):
         return 0,['reported_actual_not_requested_plan']
     if plan.intent=='verified_person' and not plan.subject_id and not plan.track_id and kind in {'person_track','event_attribution','vlm_observation'}:
@@ -17,6 +25,9 @@ def evidence_relevance(e,plan):
     if e['subject_ref'] and plan.track_id and e['subject_ref'].startswith('track:') and not e['subject_ref'].endswith(':'+str(plan.track_id)):
         return 0,['different_track']
     if e['time_scope'] and plan.effective_time_range and max(e['time_scope'][0],plan.effective_time_range[0])>min(e['time_scope'][1],plan.effective_time_range[1]):return 0,['outside_query_time']
+    if prioritize_material:
+        score=120 if student_id and material_student==student_id else 110
+        return score,['assessment_or_instruction_material_for_query']
     if kind=='knowledge_rule':
         rule=p['rule'];rid=rule['rule_id']
         if plan.focus=='alignment_audit':return (100,['source_version_and_alignment_policy']) if rid=='evidence:alignment_required' else (0,['unrelated_rule'])

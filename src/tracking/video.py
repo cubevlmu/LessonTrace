@@ -4,6 +4,7 @@ import json
 import sqlite3
 from pathlib import Path
 from fractions import Fraction
+from src.runtime_paths import data_path, stored_path
 from .schemas import global_time
 
 
@@ -23,8 +24,8 @@ def registered_clip(db,clip_id=None,video_id=None):
 
 
 def safe_path(clip,root,require_exists=True):
-    path=Path(clip['path']).resolve();root=Path(root).resolve()
-    managed_root=Path(__file__).resolve().parents[2]/'data/analysis_private/media'
+    path=stored_path(clip['path']);root=Path(root).resolve()
+    managed_root=data_path('analysis_private', 'media')
     managed=(clip.get('source_kind')=='uploaded_recording' and managed_root.resolve() in path.parents and path.name==clip['clip_id']+'.mp4')
     if (root not in path.parents and not managed) or path.suffix.lower()!='.mp4':raise ValueError('registered_path_outside_root')
     if clip.get('decode_status')=='deleted':raise ValueError('registered_video_deleted')
@@ -60,6 +61,37 @@ def decode_frames(path):
                    'original_pts_seconds':float(Fraction(frame.pts)*frame.time_base),
                    'origin_pts_seconds':float(origin),'frame':frame}
         if previous is None:raise ValueError('video_has_no_decodable_frames')
+
+
+def decode_at_recorded_pts(path, records):
+    """Seek to a preceding keyframe and return only exact registered presentation times."""
+    import av
+    by_time = {Fraction(r['pts'] * r['time_base_num'], r['time_base_den']): r for r in records}
+    if not records or len(by_time) != len(records):
+        return
+    with av.open(str(path)) as container:
+        stream = container.streams.video[0]
+        first = next(container.decode(stream), None)
+        if first is None or first.pts is None or first.time_base is None:
+            return
+        origin = first.pts * first.time_base
+        earliest, latest = min(by_time), max(by_time)
+        try:
+            container.seek(int(earliest / stream.time_base), stream=stream, backward=True)
+            for frame in container.decode(stream):
+                if frame.pts is None or frame.time_base is None:
+                    return
+                pts = frame.pts * frame.time_base
+                if pts > latest:
+                    return
+                record = by_time.pop(pts, None)
+                if record is not None:
+                    yield {'frame_index': record['frame_index'], 'local_timestamp': float(pts - origin), 'frame': frame}
+                if not by_time:
+                    return
+        except (av.FFmpegError, OverflowError, ValueError):
+            # The caller sequentially decodes any frames the index could not supply.
+            return
 
 
 def probe(path,clip):

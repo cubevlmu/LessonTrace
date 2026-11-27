@@ -4,6 +4,7 @@ import os
 import subprocess
 import time
 from pathlib import Path
+from src.runtime_paths import data_path
 from filelock import FileLock,Timeout
 from src.identity.store import now
 from src.tracking.repository import TrackingRepository
@@ -32,11 +33,11 @@ def materialize(service,jid,video_id):
 
 def execute(service,jid,observer_factory=Observer,model_provider=model_info):
     repo=Repository(service.repo);job=repo.job(jid);settings=job['config_and_runtime'];conf=Config.model_validate(settings['config'])
-    folder=ROOT/'data/analysis_private';folder.mkdir(exist_ok=True,parents=True)
+    folder=data_path('analysis_private');folder.mkdir(exist_ok=True,parents=True)
     joblock=FileLock(str(folder/(jid+'.lock')))
     try:joblock.acquire(timeout=0)
     except Timeout:return
-    start=time.monotonic();deadline=start+conf.budget_seconds;gpu=FileLock(str(ROOT/'data/attribution_private/actor_vlm.lock'))
+    start=time.monotonic();deadline=start+conf.budget_seconds;gpu=FileLock(str(data_path('attribution_private', 'actor_vlm.lock')))
     telemetry=None
     try:
         if job['status'] not in {'queued','running'}:return

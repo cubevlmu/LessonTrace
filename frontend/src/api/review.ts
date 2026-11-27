@@ -1,14 +1,18 @@
 import { z } from "zod";
-import { reportSchema, historySchema } from "../models/backend";
+import { reportSchema, historySchema, playbackSchema, type Report } from "../models/backend";
 import { request, responseError } from "./client";
 export const askReview = (body: Record<string, unknown>) =>
-  request("fusion/ask", reportSchema, body);
+  request<Report>("fusion/ask", reportSchema, body);
 export const generateReport = (job: string, documentIds:string[]=[]) =>
-  request("analysis/jobs/" + job + "/report", reportSchema, {document_ids:documentIds}, "POST");
+  request<Report>("analysis/jobs/" + job + "/report", reportSchema, {document_ids:documentIds}, "POST");
 export const getReport = (id: string) =>
-  request("fusion/reports/" + id, reportSchema);
+  request<Report>("fusion/reports/" + id, reportSchema);
+export type PlaybackTarget = {evidence_id: string} | {target: "selected_range"};
+export const getReportPlayback = (id: string, target: PlaybackTarget) =>
+  request("fusion/reports/" + encodeURIComponent(id) + "/playback?" +
+    new URLSearchParams(target), playbackSchema);
 export const refreshReport = (id: string) =>
-  request("fusion/reports/" + id + "/refresh", reportSchema, {}, "POST");
+  request<Report>("fusion/reports/" + id + "/refresh", reportSchema, {}, "POST");
 export const getHistory = (event: string) =>
   request(
     "validation/attribution/history?candidate_id=" +

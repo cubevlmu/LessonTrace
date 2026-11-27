@@ -3,6 +3,7 @@ import subprocess
 import sys
 import os
 from pathlib import Path
+from src.runtime_paths import data_path
 from filelock import FileLock,Timeout
 from src.agent.fusion.evidence import version
 from src.identity.store import uid,now
@@ -47,7 +48,7 @@ def create(service,body,actor):
 
 def launch(jid):
     if os.getenv('INTICLASS_EXTERNAL_WORKER')=='1':return
-    folder=ROOT/'data/analysis_private/logs';folder.mkdir(exist_ok=True,parents=True)
+    folder=data_path('analysis_private', 'logs');folder.mkdir(exist_ok=True,parents=True)
     with (folder/(jid+'.log')).open('ab') as log:
         subprocess.Popen([sys.executable,str(ROOT/'scripts/run_automatic_analysis.py'),'--job-id',jid],cwd=ROOT,
             stdin=subprocess.DEVNULL,stdout=log,stderr=log,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
@@ -61,7 +62,7 @@ def control(service,jid,body,actor):
         else:repo.update(jid,status='paused' if body.action=='pause' else 'cancelled')
     else:
         # An active worker holds the OS job lock. Never run a second copy.
-        lock=FileLock(str(ROOT/'data/analysis_private'/(jid+'.lock')))
+        lock=FileLock(str(data_path('analysis_private')/(jid+'.lock')))
         try:lock.acquire(timeout=0)
         except Timeout:raise ValueError('worker_active; wait_for_pause_or_cancel_completion')
         else:lock.release()

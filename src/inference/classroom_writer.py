@@ -18,7 +18,7 @@ homework规则只约束“作业行为”类别，不代表“看见书写动作
 面向一位忙碌的任课教师写作，语气自然、具体、平实。先直接回答老师这次问的事情，随后解释依据，最后给必要的下一步；不复述整段问题，不写“作为AI”“综上所述”等套话，不逐段重复免责声明。限制在确实影响判断的位置说明一次。正文不出现数据库、token、schema、API、Track ID、内部证据编号或调试语言。
 有姓名时优先用提供的展示姓名；演示化名可以作为资料中的称呼，但不能因此宣称核实了真实身份。同一人物的重复轨迹不当成多个学生。示例作业中的提交、成绩、教师评语属于虚构演示情境，必须明确说“按演示登记/样例作答”，不得写成原课堂真实学业事实。引用片段只支持片段内容，不得据未见记录断言全班完成率。
 普通问答：简单问题1至2段、通常100至250字；复杂比较最多3段。承接上一轮的对象与问题，只补充本轮需要的新信息；老师要求简短就简短，要求表格可在段落text里使用规范Markdown表格。建议最多2至3条，给出具体问题、反馈话术或下一节课的操作，不把“加强关注、因材施教”当作完整建议。
-报告请求：综合分析2至4段、建议2至4段，每段80至160字，使用有信息量的小标题；先写最值得教师关注的结论，再按“课堂表现与任务对照→作业体现的优势和待练习点→下节课如何调整”展开。建议写清做什么、用哪个例子、如何检查改进；有充分资料才比较或统计，不硬凑空章节。不能用视频姿态判断作业质量，也不能把样例作业的表现反推成视频中的行为。
+报告请求：综合分析和建议各0至4段，每段80至160字，使用有信息量的小标题；先写最值得教师关注的结论，再按“课堂表现与任务对照→作业体现的优势和待练习点→下节课如何调整”展开。建议写清做什么、用哪个例子、如何检查改进；有充分资料才比较或统计，不硬凑空章节。不能用视频姿态判断作业质量，也不能把样例作业的表现反推成视频中的行为。
 所有输出使用最后一条消息output_contract指定的JSON结构，报告和普通问答结构不同，不加代码围栏。每段引用放在evidence_refs；正文用自然语言称呼资料，不输出内部短编号。所有陈述是待教师核查的AI分析，不能宣称经过独立事实验证。'''
 
 class AnalysisParagraph(BaseModel):
@@ -38,8 +38,8 @@ class ReportParagraph(BaseModel):
     evidence_refs:list[str]=Field(min_length=1,max_length=12)
 class ReportDraft(BaseModel):
     model_config=ConfigDict(extra='forbid')
-    analysis:list[ReportParagraph]=Field(min_length=2,max_length=4)
-    recommendations:list[ReportParagraph]=Field(min_length=2,max_length=4)
+    analysis:list[ReportParagraph]=Field(min_length=0,max_length=4)
+    recommendations:list[ReportParagraph]=Field(min_length=0,max_length=4)
 
 def context_packet(report,plan,limit):
     from collections import defaultdict,deque
@@ -112,7 +112,7 @@ def analyze(provider,report,plan,timeout):
         if len(packet['approved_observations'])>=12:break
     # Stable prefix holds classroom evidence; the variable question and conversation come last.
     report_mode=plan.output_mode=='report';contract=ReportDraft if report_mode else AnalysisDraft
-    format_note='报告必须返回 {"analysis":[{"title":"小节标题","text":"具体分析文字","evidence_refs":["引用ID"]}],"recommendations":[同样结构]}；两个数组分别至少2段。' if report_mode else '问答返回 {"paragraphs":[{"section":"analysis或recommendations","text":"回答本问题的具体文字","evidence_refs":["引用ID"]}]}。'
+    format_note='报告必须返回 {"analysis":[{"title":"小节标题","text":"具体分析文字","evidence_refs":["引用ID"]}],"recommendations":[同样结构]}；两个数组各0至4段，没有可写内容时可为空。' if report_mode else '问答返回 {"paragraphs":[{"section":"analysis或recommendations","text":"回答本问题的具体文字","evidence_refs":["引用ID"]}]}。'
     template_note={'lesson':'固定范式：课堂组织与教学任务、可观察表现、教学安排对照、改进步骤、下一次课的跟进。','students':'固定范式：已覆盖人群、外显表现的共性与差异、任务对照、群体教学支持、未覆盖人群。轨迹数不能当学生人数。','student':'固定范式：有效人物范围、个人动作时序、个人作业对照、个别反馈和后续支持。未确认身份不能冒充实名事实。'}.get(plan.report_template,'')
     messages=[{'role':'system','content':SYSTEM},{'role':'user','content':'课堂背景数据（来源各自独立）：\n'+json.dumps(packet,ensure_ascii=False,sort_keys=True)},{'role':'user','content':json.dumps({'question':plan.user_question,'output_mode':plan.output_mode,'report_template':template_note,'teacher_editing_draft_untrusted_text':plan.report_context,'output_contract':format_note,'previous_turns':report.get('_conversation',[])},ensure_ascii=False)}]
     schema=contract.model_json_schema()
@@ -127,7 +127,11 @@ def analyze(provider,report,plan,timeout):
         if value is None:return None,record
         try:
             if report_mode:
-                detailed=ReportDraft.model_validate(value);draft=AnalysisDraft(paragraphs=[AnalysisParagraph(section='analysis',**p.model_dump()) for p in detailed.analysis]+[AnalysisParagraph(section='recommendations',**p.model_dump()) for p in detailed.recommendations])
+                detailed=ReportDraft.model_validate(value)
+                if not (detailed.analysis or detailed.recommendations):
+                    record.update(status='no_supported_paragraphs',accepted_paragraphs=0)
+                    return None,record
+                draft=AnalysisDraft(paragraphs=[AnalysisParagraph(section='analysis',**p.model_dump()) for p in detailed.analysis]+[AnalysisParagraph(section='recommendations',**p.model_dump()) for p in detailed.recommendations])
             else:draft=AnalysisDraft.model_validate(value)
             known={e['evidence_id'] for e in packet['sources']};types={e['evidence_id']:e['source_type'] for e in packet['sources']}
             from src.agent.visual_evidence_policy import semantic_findings

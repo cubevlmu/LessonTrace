@@ -1,4 +1,5 @@
 import json
+from src.runtime_paths import stored_path
 from src.identity.store import uid,now
 
 
@@ -24,7 +25,10 @@ class Repository:
         with self.repo.connection() as c:r=c.execute('SELECT * FROM analysis_videos WHERE video_id=?',(vid,)).fetchone()
         if not r:raise ValueError('analysis_video_missing')
         if actor is not None and r['owner']!=actor:raise PermissionError('analysis_video_owner_required')
-        return {**dict(r),'metadata':json.loads(r['payload'])}
+        metadata=json.loads(r['payload'])
+        for key in ('media_path','original_path'):
+            if metadata.get(key):metadata[key]=str(stored_path(metadata[key]))
+        return {**dict(r),'metadata':metadata}
     def job(self,jid,actor=None):
         with self.repo.connection() as c:r=c.execute('SELECT * FROM analysis_jobs WHERE job_id=?',(jid,)).fetchone()
         if not r:raise ValueError('analysis_job_missing')

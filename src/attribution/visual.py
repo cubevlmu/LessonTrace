@@ -26,6 +26,24 @@ def scaled(image,long_edge=512):
     return cv2.resize(image,(max(1,round(w*factor)),max(1,round(h*factor))))
 
 
+def discovery_image(scene, crop, edge):
+    """Allocate a readable target panel; draw its border outside the original crop."""
+    left_width = round(edge * .56)
+    height = max(16, round(edge * .44))
+    canvas = np.zeros((height, edge, 3), dtype=np.uint8)
+    for image, x, width in ((scene, 0, left_width), (crop, left_width, edge - left_width)):
+        h, w = image.shape[:2]
+        scale = min((width - 4) / w, (height - 4) / h)
+        size = (max(1, round(w * scale)), max(1, round(h * scale)))
+        pixels = cv2.resize(image, size, interpolation=cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR)
+        left = x + (width - size[0]) // 2
+        top = (height - size[1]) // 2
+        canvas[top:top + size[1], left:left + size[0]] = pixels
+        if x:
+            cv2.rectangle(canvas, (left - 1, top - 1), (left + size[0], top + size[1]), (255, 220, 0), 1)
+    return canvas
+
+
 def subject_gate(judgment,frames):
     """Model statements alone cannot prove ownership; independently check anchors."""
     known={f['frame_id']:f for f in frames};failures=[]
@@ -58,31 +76,40 @@ class ActorReviewer:
         self.temperature_checks=temperature_checks
 
     def extract(self,d,observations,review_id,prefix):
+        return self.extract_frames(d, [o['frame_index'] for o in observations], review_id, prefix)
+
+    def extract_frames(self, d, indices, review_id, prefix, input_long_edge=None):
         folder=self.root/review_id;folder.mkdir(exist_ok=True)
         frames=[]
         source=self.service.source
-        batch=source.frames(d['run_id'],d['track_id'],[o['frame_index'] for o in observations]) if hasattr(source,'frames') else None
-        for index,o in enumerate(observations):
-            image,actual,_,_=batch[index] if batch is not None else source.frame(d['run_id'],d['track_id'],o['frame_index'])
+        batch=source.frames(d['run_id'],d['track_id'],indices) if hasattr(source,'frames') else None
+        for index,frame_index in enumerate(indices):
+            image,actual,_,_=batch[index] if batch is not None else source.frame(d['run_id'],d['track_id'],frame_index)
             h,w=image.shape[:2];a,b,c,z=[int(x) for x in bbox(actual)]
             if not 0<=a<c<=w or not 0<=b<z<=h:raise ValueError('target_detection_out_of_bounds')
-            other=[bbox(x) for x in self.service.source.rows('SELECT * FROM track_observations WHERE run_id=? AND frame_index=? AND track_id<>?',(d['run_id'],o['frame_index'],d['track_id']))]
+            other=[bbox(x) for x in self.service.source.rows('SELECT * FROM track_observations WHERE run_id=? AND frame_index=? AND track_id<>?',(d['run_id'],frame_index,d['track_id']))]
             marked=image.copy()
             for bb in other:cv2.rectangle(marked,tuple(map(int,bb[:2])),tuple(map(int,bb[2:])),(160,160,160),1)
             cv2.rectangle(marked,(a,b),(c,z),(255,220,0),4)
             cv2.putText(marked,'TARGET',(a,max(20,b-8)),cv2.FONT_HERSHEY_SIMPLEX,.7,(255,220,0),2)
             crop=image[b:z,a:c].copy();input_crop=scaled(crop)
             cv2.rectangle(input_crop,(0,0),(input_crop.shape[1]-1,input_crop.shape[0]-1),(255,220,0),3)
-            scene=scaled(marked);panel=scaled(input_crop,256)
-            combined=np.zeros((max(scene.shape[0],panel.shape[0]),scene.shape[1]+panel.shape[1],3),dtype=np.uint8)
-            combined[:scene.shape[0],:scene.shape[1]]=scene;combined[:panel.shape[0],scene.shape[1]:]=panel
-            combined=scaled(combined)
+            scene=scaled(marked)
+            if input_long_edge is not None:
+                combined = discovery_image(scene, crop, input_long_edge)
+            else:
+                panel=scaled(input_crop,256)
+                combined=np.zeros((max(scene.shape[0],panel.shape[0]),scene.shape[1]+panel.shape[1],3),dtype=np.uint8)
+                combined[:scene.shape[0],:scene.shape[1]]=scene;combined[:panel.shape[0],scene.shape[1]:]=panel
+                combined=scaled(combined)
             fid=prefix+str(index).zfill(3);files={};hashes={}
-            for view,pixels in [('full',image),('roi',crop),('input_full',scaled(marked)),('input_roi',input_crop),('input_combined',combined)]:
+            for view,pixels in [('full',image),('roi',crop),('input_full',scene),('input_roi',input_crop),('input_combined',combined)]:
                 path=folder/(fid+'_'+view+'.jpg')
-                if not cv2.imwrite(str(path),pixels):raise ValueError('evidence_image_write_failed')
-                files[view]=str(path);hashes[view]=hashlib.sha256(path.read_bytes()).hexdigest()
-            frames.append({'frame_id':fid,'frame_index':o['frame_index'],'global_time':o['global_timestamp'],'local_time':o['local_timestamp'],
+                ok, encoded = cv2.imencode('.jpg', pixels)
+                if not ok:raise ValueError('evidence_image_write_failed')
+                path.write_bytes(encoded)
+                files[view]=str(path);hashes[view]=hashlib.sha256(encoded).hexdigest()
+            frames.append({'frame_id':fid,'frame_index':frame_index,'global_time':actual['global_timestamp'],'local_time':actual['local_timestamp'],
                            'width':w,'height':h,'roi_xyxy':bbox(actual),'other_person_boxes':other,'files':files,'sha256':hashes})
         return frames
 

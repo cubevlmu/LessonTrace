@@ -62,6 +62,8 @@ export const jobSchema = z
             selected_windows: z.number(),
             eligible_windows_before_budget: z.number(),
             omitted_windows: z.number(),
+            time_bins: z.number().int().positive().optional(),
+            empty_time_bins: z.array(z.number().int().positive()).optional(),
           })
           .passthrough()
           .optional(),
@@ -133,6 +135,11 @@ export const windowSchema = z
   })
   .passthrough();
 export type WindowResult = z.infer<typeof windowSchema>;
+export const coverageSchema = z.object({
+  observed_windows: z.number().int().nonnegative(),
+  failed_windows: z.number().int().nonnegative(),
+});
+export type Coverage = z.infer<typeof coverageSchema>;
 export const scopeSchema = z.object({
   run_id: z.string().optional(),
   clip_id: z.string(),
@@ -141,6 +148,7 @@ export const scopeSchema = z.object({
   end: finite,
   width: finite.positive(),
   height: finite.positive(),
+  coverage: coverageSchema.nullable().optional(),
 });
 export type Scope = z.infer<typeof scopeSchema>;
 export const trackSchema = z
@@ -210,14 +218,48 @@ const risk = z
     evidence_refs: z.array(z.string()),
   })
   .passthrough();
+const v2ReportFields = {
+  statements: z.array(z.object({
+    statement_id: z.string(),
+    role: z.string(),
+    section_id: z.string().optional(),
+    text: z.string(),
+    evidence_refs: z.array(z.string()).default([]),
+    depends_on_statements: z.array(z.string()).default([]),
+    relation_refs: z.array(z.string()).default([]),
+    query_refs: z.array(z.string()).default([]),
+    change_event_refs: z.array(z.string()).default([]),
+  }).passthrough()).optional(),
+  clarification_candidates: z.array(z.object({
+    subject_id: z.string(),
+    display_name: z.string(),
+    classroom_name: z.string().optional(),
+    has_submission: z.boolean().optional(),
+  }).passthrough()).optional(),
+  scope_key: z.string().optional(),
+};
 export const reportSchema = z.discriminatedUnion("status", [
   z
     .object({
+      ...v2ReportFields,
       report_id: z.string(),
       product_scope:z.object({classroom_name:z.string(),subject_name:z.string().nullable()}).passthrough().nullable().optional(),
       status: z.enum(["current","historical_snapshot"]),
       answer: z.string(),
-      narrative:z.array(z.object({heading:z.string(),text:z.string(),evidence_refs:z.array(z.string()),sentence_ids:z.array(z.string()).optional()})).optional(),
+      coverage: coverageSchema.nullable().optional(),
+      query_plan: z.object({
+        intent: z.string().optional(),
+        effective_time_range: range.nullable().optional(),
+        track_id: z.number().int().positive().nullable().optional(),
+        roster_subject_id: z.string().nullable().optional(),
+        document_ids: z.array(z.string()).optional(),
+        material_mode: z.enum(["linked", "selected", "none"]).optional(),
+      }).passthrough().optional(),
+      direct_answer: z.object({text: z.string().optional(), evidence_refs: z.array(z.string())}).passthrough().optional(),
+      boundary_text: z.string().optional(),
+      check_text: z.string().optional(),
+      check_evidence_refs: z.array(z.string()).optional(),
+      narrative:z.array(z.object({heading:z.string(),text:z.string(),evidence_refs:z.array(z.string()),sentence_ids:z.array(z.string()).optional(),analysis_section:z.string().optional()})).optional(),
       narrative_generation:z.object({status:z.string()}).passthrough().optional(),
       recognition_records:z.array(z.object({recognition_state:z.string(),text:z.string(),time_label:z.string(),evidence_refs:z.array(z.string()),source_label:z.string(),reliability:z.enum(['高','中','低']),reliability_basis:z.string(),verification_status:state,subject_ref:z.string().nullable()})).optional(),
       claims: z.array(claimSchema),
@@ -227,8 +269,9 @@ export const reportSchema = z.discriminatedUnion("status", [
       conflicts: z.array(risk),
       classroom: z
         .object({
-          run_id: z.string(),
-          clip_id: z.string(),
+          run_id: z.string().nullish(),
+          clip_id: z.string().nullish(),
+          lesson_id: z.string().nullish(),
           time_range: range.nullable(),
         })
         .passthrough(),
@@ -242,6 +285,7 @@ export const reportSchema = z.discriminatedUnion("status", [
     .passthrough(),
   z
     .object({
+      ...v2ReportFields,
       report_id: z.string(),
       status: z.literal("stale"),
       reason: z.string(),
@@ -252,6 +296,24 @@ export const reportSchema = z.discriminatedUnion("status", [
     .passthrough(),
 ]);
 export type Report = z.infer<typeof reportSchema>;
+export const playbackSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("available"),
+    run_id: z.string(),
+    clip_id: z.string(),
+    media_url: z.string(),
+    duration: finite.positive(),
+    local_range: range,
+    global_range: range,
+    track_id: z.number().int().positive().nullable(),
+  }),
+  z.object({
+    status: z.literal("unavailable"),
+    reason: z.enum(["report_stale", "reference_missing", "not_video",
+      "source_mismatch", "media_unavailable", "time_out_of_range"]),
+  }),
+]);
+export type Playback = z.infer<typeof playbackSchema>;
 export const historySchema = z.array(
   z
     .object({

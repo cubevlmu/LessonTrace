@@ -5,19 +5,27 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import stat
 import subprocess
 import sys
 
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 
-def alias(path,target):
+def alias(path,target,previous=None):
+    if os.path.lexists(path) and not path.exists():
+        # Repair only a broken link recorded by this installation's migration.
+        if previous is None or path.resolve()!=previous.resolve():
+            raise ValueError('unrecognized_broken_alias: '+str(path))
+        if path.is_symlink():path.unlink()
+        elif os.name=='nt' and path.lstat().st_reparse_tag==stat.IO_REPARSE_TAG_MOUNT_POINT:path.rmdir()
+        else:raise ValueError('legacy_alias_conflict: '+str(path))
     if path.exists():
         if path.resolve()!=target.resolve():raise ValueError('legacy_alias_conflict: '+str(path))
         return
     if os.name=='nt':
         quote=lambda p:"'"+str(p).replace("'","''")+"'"
         subprocess.run(['powershell.exe','-NoProfile','-Command',
-                        'New-Item -ItemType Junction -Path '+quote(path)+' -Target '+quote(target)+' | Out-Null'],check=True,capture_output=True)
+                        'New-Item -ErrorAction Stop -ItemType Junction -Path '+quote(path)+' -Target '+quote(target)+' | Out-Null'],check=True,capture_output=True)
     else:path.symlink_to(target,target_is_directory=True)
 
 def move_directory(source,destination):
@@ -33,11 +41,19 @@ def main():
     old=ROOT/'data';target=ROOT/'lesson_trace_data';old_outputs=ROOT/'outputs'
     for path in [old,target,old_outputs]:
         if path.parent.resolve()!=ROOT:raise ValueError('migration_target_outside_project')
-    already=old.exists() and old.resolve()==target.resolve()
+    outputs=target/'outputs'
+    manifest_file=target/'config/storage_migration.json'
+    already=old.exists() and old.resolve()==target.resolve() and old_outputs.exists() and old_outputs.resolve()==outputs.resolve()
     if not args.apply:
         print(json.dumps({'already_migrated':already,'destination':str(target),'apply_required':not already}));return
     if already:
         print(json.dumps({'already_migrated':True,'data_root':str(target)}));return
+    if manifest_file.is_file():
+        previous=json.loads(manifest_file.read_text(encoding='utf-8'))['legacy_aliases']
+        for name,path,dest in [('data',old,target),('outputs',old_outputs,outputs)]:
+            if not dest.is_dir():raise ValueError('missing_migrated_directory: '+str(dest))
+            alias(path,dest,Path(previous[name]))
+        print(json.dumps({'aliases_restored':True,'data_root':str(target)}));return
     if target.exists() and old.exists():raise ValueError('both_runtime_roots_exist; no_overwrite')
     import psutil
     for process in psutil.process_iter(['pid','name','cmdline']):
@@ -49,7 +65,8 @@ def main():
             if in_project:raise RuntimeError('stop_managed_process_before_migration: '+str(process.pid))
     stamp=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     backups=[]
-    if old.exists():
+    moved_old_data=old.exists()
+    if moved_old_data:
         backup=old/'product_backups'/('storage_migration_'+stamp);backup.mkdir(parents=True)
         for path in old.rglob('*.db'):
             if 'product_backups' in path.parts:continue
@@ -63,7 +80,7 @@ def main():
             backups.extend(str(p.relative_to(backup)) for p in backup.rglob('*.db'))
     try:alias(old,target)
     except Exception:
-        if not old.exists():target.rename(old)
+        if moved_old_data and not os.path.lexists(old):target.rename(old)
         raise
     config=target/'config';config.mkdir(exist_ok=True)
     runtime=target/'tracking_runtime.json'

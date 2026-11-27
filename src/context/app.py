@@ -232,4 +232,6 @@ def create_context_app(runtime,private_dir=None,identity_dir='data/identity_priv
     mount_model_settings(app,service,account)
     from .lessons import mount as mount_lessons
     mount_lessons(app,service,account,writer)
+    from . import lesson_graph
+    lesson_graph.mount(app, service, account, writer)
     return app

@@ -60,8 +60,21 @@ export const getObservations = (run: string, track: number) =>
     `fusion/observations?run_id=${run}&track_id=${track}`,
     z.array(observationSchema),
   );
-export const getScope = (run: string) =>
-  request("fusion/scope?run_id=" + run, scopeSchema);
+type CoverageFilters = {
+  track_id?: number | null;
+  roster_subject_id?: string | null;
+  start?: number | null;
+  end?: number | null;
+};
+export const getScope = (run: string, filters?: CoverageFilters) => {
+  const params = new URLSearchParams({run_id: run});
+  if (filters) {
+    params.set("include_coverage", "true");
+    for (const [key, value] of Object.entries(filters))
+      if (value != null) params.set(key, String(value));
+  }
+  return request("fusion/scope?" + params, scopeSchema);
+};
 export const presets = {
   server: {max_tracks:1,max_windows:1,max_calls:2,budget_seconds:360,timeout:240,frames:2,input_long_edge:320,stride:4,device:'cpu'},
   quick: { max_tracks: 2, max_windows: 2, max_calls: 4, budget_seconds: 450 },

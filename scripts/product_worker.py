@@ -9,21 +9,22 @@ ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 from filelock import FileLock,Timeout
 
 def main():
-    from src.runtime_paths import load_runtime,apply_runtime_environment
+    from src.runtime_paths import load_runtime,apply_runtime_environment,data_path
     apply_runtime_environment()
     p=argparse.ArgumentParser();p.add_argument('--once',action='store_true');args=p.parse_args()
     from src.context.app import create_context_app
     from src.behavior_discovery.pipeline import execute
     from src.behavior_discovery.repository import Repository
     runtime=load_runtime()
-    app=create_context_app(runtime);service=app.state.context;repo=Repository(service.repo)
-    (ROOT/'data/analysis_private').mkdir(parents=True,exist_ok=True)
-    lock=FileLock(str(ROOT/'data/analysis_private/queue_worker.lock'));lock.acquire(timeout=0)
+    app=create_context_app(runtime,identity_dir=data_path('identity_private'));service=app.state.context;repo=Repository(service.repo)
+    queue_dir = data_path('analysis_private')
+    queue_dir.mkdir(parents=True,exist_ok=True)
+    lock=FileLock(str(queue_dir/'queue_worker.lock'));lock.acquire(timeout=0)
     try:
         # Recover only namespaces without a live executor; completed output is retained.
         with service.repo.connection() as c:rows=c.execute("SELECT job_id,status FROM analysis_jobs WHERE status IN ('running','pausing','cancelling') AND json_extract(payload,'$.product_queue')=1").fetchall()
         for row in rows:
-            joblock=FileLock(str(ROOT/'data/analysis_private'/(row['job_id']+'.lock')))
+            joblock=FileLock(str(queue_dir/(row['job_id']+'.lock')))
             try:joblock.acquire(timeout=0)
             except Timeout:continue
             try:

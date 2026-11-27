@@ -16,11 +16,43 @@ def migrate(repo):
     CREATE INDEX IF NOT EXISTS fusion_reports_owner ON fusion_reports(owner,created_at);
     CREATE TABLE IF NOT EXISTS fusion_report_audit(audit_id TEXT PRIMARY KEY,report_id TEXT NOT NULL,actor TEXT NOT NULL,operation TEXT NOT NULL,created_at TEXT NOT NULL,payload TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS fusion_conversation_heads(owner TEXT NOT NULL,run_id TEXT NOT NULL,report_id TEXT NOT NULL,PRIMARY KEY(owner,run_id));
+    CREATE TABLE IF NOT EXISTS scoped_conversation_heads(owner TEXT NOT NULL,scope_key TEXT NOT NULL,last_report_id TEXT NOT NULL,updated_at TEXT NOT NULL,PRIMARY KEY(owner,scope_key));
     ''')
 
 
-def snapshot(service,retrieved,plan):
+def manifest(service,retrieved,plan):
     from src.validation.evidence_chain import dependencies
+    from .lesson_evidence import relation_ref
+    deps=dependencies(service,retrieved,plan)
+    deps.extend({'dependency_id':'lesson_relation:'+relation_ref(r),'kind':'lesson_relation',
+                 'version':r['basis_version'],'time_scope':None} for r in retrieved.get('lesson_relations',[]))
+    deps.extend({'dependency_id':'negative_query:'+q['kind'],'kind':'negative_query_digest',
+                 'version':q['digest'],'query_scope':q['scope'],'state':q['state'],'time_scope':None}
+                for q in retrieved.get('lesson_queries',[]))
+    if 'lesson_context' in retrieved:
+        deps.append({'dependency_id':'lesson_scope','kind':'lesson_scope',
+                     'version':version(retrieved['lesson_context']),'time_scope':None})
+    return deps
+
+
+def read_evidence(service,plan,actor,allow_identity,*,lesson_graph=False,read_video=None,index=None):
+    if lesson_graph:
+        from .lesson_evidence import retrieve_lesson
+        return retrieve_lesson(service,plan,actor,allow_identity,read_video or retrieve,index)
+    return (read_video or retrieve)(service,plan,actor,allow_identity)
+
+
+def current_inputs(service,request,actor,allow_identity,*,lesson_graph=False):
+    from .roster_scope import build_plan
+    from .lesson_evidence import index_for, has_assessment
+    index=index_for(service,request,actor) if lesson_graph else None
+    if (request.roster_subject_id or request.subject_id) and not allow_identity and lesson_graph:
+        raise PermissionError('review_role_required_for_identity_or_visual_tool')
+    _,plan=build_plan(service,request,actor,has_assessment_evidence=has_assessment(index,request))
+    return plan,read_evidence(service,plan,actor,allow_identity,lesson_graph=lesson_graph,index=index)
+
+
+def snapshot(service,retrieved,plan):
     # Existing repository revision changes include permissions/mappings/documents.
     from src.context.product_scope import metadata
     owner=retrieved.get('product_owner')
@@ -29,31 +61,54 @@ def snapshot(service,retrieved,plan):
     return version({'writing_policy':writing_policy,'text_runtime_version':version(configured(service)),'product_scope':metadata(service,plan,owner) if owner else None,'evidence':sorted((e['evidence_id'],e['source_version']) for e in retrieved['evidence']),
         'source_file':retrieved['bundle']['run']['metadata']['source_sha256'] if retrieved['bundle'] else None,
         'policy':VERSION,'policy_code':version({p.name:p.read_text(encoding='utf-8') for p in Path(__file__).parent.glob('*.py')}),
-        'scope':plan.model_dump(),'dependencies':dependencies(service,retrieved,plan)})
+        'scope':plan.model_dump(exclude={'report_context'}),'dependencies':manifest(service,retrieved,plan)})
 
 
-def save(service,report,request,plan,actor,snap,parent_id=None):
+def save(service,report,request,plan,actor,snap,parent_id=None,*,allow_identity=False):
     report['report_id']=uid();report['created_at']=now();report['status']='current';report['parent_id']=parent_id
-    with service.repo.connection() as c:
-        c.execute('INSERT INTO fusion_reports VALUES (?,?,?,?,?,?,?,?,?)',(report['report_id'],actor,report['created_at'],parent_id,'current',json.dumps(request.model_dump()),json.dumps(plan.model_dump()),snap,json.dumps(report,ensure_ascii=False)))
+    # A prior report's rendered text is a one-shot writing input, never
+    # stored as a future prompt in refreshes, thread scopes or API exports.
+    request_payload=request.model_dump(exclude={'report_context'})
+    query_payload=plan.model_dump(exclude={'report_context'})
+    if 'query_plan' in report:
+        report['query_plan']=query_payload
+    def write(c,_checked=None):
+        c.execute('INSERT INTO fusion_reports VALUES (?,?,?,?,?,?,?,?,?)',(report['report_id'],actor,report['created_at'],parent_id,'current',json.dumps(request_payload),json.dumps(query_payload),snap,json.dumps(report,ensure_ascii=False)))
         c.execute('INSERT INTO fusion_report_audit VALUES (?,?,?,?,?,?)',(uid(),report['report_id'],actor,'created',now(),json.dumps({'parent_id':parent_id,'snapshot':snap})))
+    if 'lesson_evidence' in report:
+        from fastapi import HTTPException
+        from src.context.report_adoptions import serialized
+        def validate():
+            try:
+                current,fresh=current_inputs(service,request,actor,allow_identity,lesson_graph=True)
+                matches=snapshot(service,fresh,current)==snap
+            except (ValueError,PermissionError,OSError):
+                matches=False
+            if not matches:
+                raise HTTPException(409,'report_sources_changed_during_generation')
+        serialized(service.repo,validate,write)
+    else:
+        with service.repo.connection() as c:write(c)
     return report
 
 
 def load(service,rid,actor,allow_identity=False):
-    from .planning import ReviewRequest,plan as rebuild_plan
+    from .planning import ReviewRequest
     with service.repo.connection() as c:r=c.execute('SELECT * FROM fusion_reports WHERE report_id=?',(rid,)).fetchone()
     if not r:raise ValueError('fusion_report_not_found')
     if r['owner']!=actor:raise PermissionError('fusion_report_access_denied')
-    stale=r['status']=='stale'
+    payload=json.loads(r['payload'])
+    request=ReviewRequest.model_validate_json(r['request'])
+    lesson_graph='lesson_evidence' in payload
+    if lesson_graph and (request.roster_subject_id or request.subject_id) and not allow_identity:
+        raise PermissionError('review_role_required_for_identity_or_visual_tool')
+    stale=r['status']!='current'
     invalid=[]
     if not stale:
         try:
-            from .roster_scope import build_plan
-            _,plan=build_plan(service,ReviewRequest.model_validate_json(r['request']),actor)
-            fresh=retrieve(service,plan,actor,allow_identity)
-            from src.validation.evidence_chain import dependencies,changed
-            invalid=changed(json.loads(r['payload']).get('dependency_manifest',[]),dependencies(service,fresh,plan))
+            plan,fresh=current_inputs(service,request,actor,allow_identity,lesson_graph=lesson_graph)
+            from src.validation.evidence_chain import changed
+            invalid=changed(payload.get('dependency_manifest',[]),manifest(service,fresh,plan))
             stale=snapshot(service,fresh,plan)!=r['snapshot']
         except (ValueError,PermissionError,OSError) as error:
             stale=True;invalid=[{'dependency_id':'source_or_permission','reason':str(error)}]
@@ -67,7 +122,7 @@ def load(service,rid,actor,allow_identity=False):
                 last=c.execute("SELECT payload FROM fusion_report_audit WHERE report_id=? AND operation='stale_detected' ORDER BY created_at DESC LIMIT 1",(rid,)).fetchone()
             invalid=json.loads(last[0]).get('invalid_dependencies',[]) if last else []
         return {'report_id':rid,'status':'stale','answer':None,'claims':[], 'invalid_dependencies':invalid,'reason':'证据、授权、归属、轨迹复核、时间映射或规则版本已变化；旧结论已隐藏，请重算。'}
-    return json.loads(r['payload'])
+    return payload
 
 
 def historical(service,rid,actor,allow_identity=False):
@@ -77,6 +132,13 @@ def historical(service,rid,actor,allow_identity=False):
     if r['owner']!=actor:raise PermissionError('fusion_report_access_denied')
     report=json.loads(r['payload'])
     if not report:raise PermissionError('historical_source_deleted_or_redacted')
+    if 'lesson_evidence' in report:
+        from .planning import QueryPlan
+        from .lesson_evidence import index_for
+        query=QueryPlan.model_validate(report['query_plan'])
+        if (query.roster_subject_id or query.subject_id) and not allow_identity:
+            raise PermissionError('review_role_required_for_identity_or_visual_tool')
+        index_for(service,query,actor)
     evidence=report.get('audit',{}).get('retrieved_evidence',report.get('evidence',[]))
     for e in evidence:
         did=e['provenance'].get('document_id')

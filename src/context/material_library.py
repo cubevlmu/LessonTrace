@@ -7,7 +7,7 @@ from .repository import tokens
 from src.identity.store import IdentityStore,uid
 
 
-def validate_scope(service,actor,scope):
+def validate_scope(service,actor,scope,*,connection=None):
     if scope is None:return
     scope=MaterialScope.model_validate(scope)
     if not any(scope.model_dump().values()):return
@@ -15,8 +15,13 @@ def validate_scope(service,actor,scope):
     cid=scope.classroom_id
     if scope.run_id:
         _,clip=service.source.verified_run(scope.run_id)
-        from src.behavior_discovery.repository import Repository
-        Repository(service.repo).video(clip['video_id'],actor)
+        if connection is None:
+            from src.behavior_discovery.repository import Repository
+            video=Repository(service.repo).video(clip['video_id'],actor)
+        else:
+            video=connection.execute('SELECT owner,status FROM analysis_videos WHERE video_id=?',(clip['video_id'],)).fetchone()
+            if not video or video['owner']!=actor:raise PermissionError('analysis_video_owner_required')
+        if video['status']!='active':raise ValueError('analysis_video_deleted')
         if scope.track_id and scope.track_id not in {t['track_id'] for t in service.source.tracks(scope.run_id)}:raise ValueError('material_track_not_in_video')
         with store.connection() as c:
             linked=c.execute('SELECT classroom_id FROM classroom_videos WHERE video_id=?',(clip['video_id'],)).fetchone()
@@ -26,17 +31,30 @@ def validate_scope(service,actor,scope):
     with store.connection() as c:
         if cid and not c.execute("SELECT 1 FROM classrooms WHERE classroom_id=? AND owner_actor=? AND status='active'",(cid,actor)).fetchone():raise PermissionError('material_classroom_access_denied')
         if scope.subject_id:
-            row=c.execute("SELECT cs.classroom_id FROM classroom_students cs JOIN classrooms cl ON cl.classroom_id=cs.classroom_id JOIN registered_subjects s ON s.subject_id=cs.subject_id WHERE cs.subject_id=? AND cs.status='active' AND cl.owner_actor=? AND s.status IN ('active','reference_only')",(scope.subject_id,actor)).fetchone()
-            if not row or cid and row[0]!=cid:raise PermissionError('material_student_scope_denied')
+            row=c.execute("SELECT 1 FROM classroom_students cs JOIN classrooms cl ON cl.classroom_id=cs.classroom_id JOIN registered_subjects s ON s.subject_id=cs.subject_id WHERE cs.subject_id=? AND cs.status='active' AND cl.owner_actor=? AND cl.status='active' AND s.status IN ('active','reference_only') AND (? IS NULL OR cs.classroom_id=?)",(scope.subject_id,actor,cid,cid)).fetchone()
+            if not row:raise PermissionError('material_student_scope_denied')
 
 
-def set_scope(service,did,actor,scope):
-    validate_scope(service,actor,scope);scope=MaterialScope.model_validate(scope)
+def set_scope(service,did,actor,scope,*,preserve_existing=False):
+    """Replace by default. In patch mode omitted fields survive and explicit nulls clear."""
+    scope=MaterialScope.model_validate(scope)
+    if not preserve_existing:validate_scope(service,actor,scope)
     with service.repo.connection() as c:
+        c.execute('BEGIN IMMEDIATE')
         service.repo.document(did,actor,True,c)
-        c.execute('INSERT OR REPLACE INTO context_document_scope VALUES (?,?,?,?,?)',(did,scope.run_id,scope.classroom_id,scope.subject_id,scope.track_id))
+        row=c.execute('SELECT run_id,classroom_id,subject_id,track_id FROM context_document_scope WHERE document_id=?',(did,)).fetchone()
+        previous=dict(row) if row else MaterialScope().model_dump()
+        values=scope.model_dump(exclude_unset=preserve_existing)
+        if preserve_existing:
+            if 'run_id' in values and values['run_id']!=previous['run_id']:
+                # Track IDs are local to their tracking run, even when the number is reused.
+                values.setdefault('track_id',None)
+            values={**previous,**values}
+            validate_scope(service,actor,values,connection=c)
+        if values==previous and (row or preserve_existing):return
+        c.execute('INSERT INTO context_document_scope VALUES (?,?,?,?,?) ON CONFLICT(document_id) DO UPDATE SET run_id=excluded.run_id,classroom_id=excluded.classroom_id,subject_id=excluded.subject_id,track_id=excluded.track_id',(did,values['run_id'],values['classroom_id'],values['subject_id'],values['track_id']))
         c.execute('UPDATE context_documents SET version=version+1 WHERE document_id=?',(did,))
-        service.repo.audit(c,did,actor,'material_scope_updated',scope.model_dump())
+        service.repo.audit(c,did,actor,'material_scope_updated',values)
 
 
 def scope_rows(service):
@@ -83,7 +101,10 @@ def mount(app,service,account,writer):
             service.repo.document(did,a['actor'],True,c)
             c.execute('UPDATE context_documents SET title=?,source_type=?,version=version+1 WHERE document_id=?',(body.title,body.source_type,did))
             service.repo.audit(c,did,a['actor'],'material_classified',body.model_dump())
-        set_scope(service,did,a['actor'],body.scope);return service.detail(did,a['actor'])
+        set_scope(service,did,a['actor'],body.scope)
+        from .lesson_graph import refresh_attached_document
+        refresh_attached_document(service,did,a['actor'])
+        return service.detail(did,a['actor'])
 
     @app.post('/api/context/documents/{did}/transcript')
     def transcript(did:str,body:Transcript,a=Depends(writer)):
@@ -95,6 +116,8 @@ def mount(app,service,account,writer):
             c.execute('INSERT INTO context_fts VALUES (?,?)',(pid,' '.join(tokens(body.text))))
             c.execute("UPDATE context_documents SET status='parsed_teacher_transcription',version=version+1 WHERE document_id=?",(did,))
             service.repo.audit(c,did,a['actor'],'teacher_transcription_added',{'passage_id':pid})
+        from .lesson_graph import refresh_attached_document
+        refresh_attached_document(service,did,a['actor'])
         return service.detail(did,a['actor'])
 
     @app.post('/api/context/classroom-memory',status_code=201)

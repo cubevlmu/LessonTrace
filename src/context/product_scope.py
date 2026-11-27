@@ -4,6 +4,21 @@ from pathlib import Path
 from cryptography.fernet import Fernet
 
 def metadata(service,plan,actor):
+    if plan.lesson_id:
+        # Synthetic legacy repositories do not always mount lesson sessions.
+        with service.repo.connection() as c:
+            exists=c.execute("SELECT 1 FROM sqlite_master WHERE name='lesson_sessions'").fetchone()
+            row=c.execute('SELECT classroom_id FROM lesson_sessions WHERE lesson_id=? AND owner=?',
+                          (plan.lesson_id,actor)).fetchone() if exists else None
+        if row and row['classroom_id']:
+            from src.agent.fusion.roster_scope import lesson_roster
+            roster=lesson_roster(service,plan.lesson_id,actor)
+            target=plan.roster_subject_id or plan.subject_id
+            person=next((entry for entry in roster if entry['subject_id']==target),None)
+            return {'classroom_id':row['classroom_id'],'classroom_name':roster[0]['classroom_name'] if roster else None,
+                    'subject_id':target,'subject_name':person['display_name'] if person else None,
+                    'subject_scope_kind':'teacher_selected_roster_profile_not_independent_identity' if target else None}
+        if not plan.run_id:return None
     root=getattr(service,'identity_dir',None)
     if not root:return None
     root=Path(root);path=root/'identity.db';key=root/'encryption.key'

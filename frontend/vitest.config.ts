@@ -10,7 +10,7 @@ export default defineConfig({
     poolOptions: { threads: { singleThread: true } },
     reporters: ["default", "junit"],
     outputFile: {
-      junit: "../outputs/ui_purple_validation/frontend_tests.xml",
+      junit: (process.env.INTICLASS_DATA_DIR || "../lesson_trace_data") + "/outputs/ui_purple_validation/frontend_tests.xml",
     },
   },
 });

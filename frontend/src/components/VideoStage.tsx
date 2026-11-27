@@ -1,22 +1,32 @@
-import { useEffect, useMemo,useRef, useState } from "react";
-import type { TrackObservation } from "../models/backend";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Play, Pause, Video, RotateCcw } from "lucide-react";
+import { playbackActionAt, type PlaybackActions } from "../adapters/playbackActions";
 import { fmt } from "../models/view";
-import { projectBox, observationFrames,visibleObservations } from "../adapters/video";
-import {personLabel,type IdentityLabel} from '../api/workbench';
-import { Icon } from "./Icon";
+import {
+  type PlaybackObservation,
+  projectBox,
+  observationFrames,
+  visibleObservations,
+} from "../adapters/video";
+import { personLabel, type IdentityLabel } from "../api/workbench";
+import { AlertBanner, btnClass } from "./ui/primitives";
+
 interface Props {
   src?: string;
   time: number;
   duration: number;
   onTime: (time: number) => void;
   onSeek: (time: number) => void;
-  observations?: TrackObservation[];
+  observations?: PlaybackObservation[];
+  actions?: PlaybackActions;
   label?: string;
-  selectedTrack?:number;
-  boxMode?:'all'|'single'|'hidden';
-  identityLabels?:IdentityLabel[];
-  onSelectTrack?:(trackId:number)=>void;
+  selectedTrack?: number;
+  boxMode?: "all"| "single"| "hidden";
+  identityLabels?: IdentityLabel[];
+  onSelectTrack?: (trackId: number) => void;
+  onMediaError?: (message: string) => void;
 }
+
 export function VideoStage({
   src,
   time,
@@ -24,25 +34,40 @@ export function VideoStage({
   onTime,
   onSeek,
   observations = [],
+  actions,
   label = "单段录像",
-  selectedTrack=0,boxMode='all',identityLabels=[],onSelectTrack,
+  selectedTrack = 0,
+  boxMode = "all",
+  identityLabels = [],
+  onSelectTrack,
+  onMediaError,
 }: Props) {
-  const frameIndex=useMemo(()=>observationFrames(observations),[observations]);
-  const vref = useRef<HTMLVideoElement>(null),
-    canvas = useRef<HTMLCanvasElement>(null),
-    rows = useRef(frameIndex);
-  const display=useRef({selectedTrack,boxMode,identityLabels});
-  display.current={selectedTrack,boxMode,identityLabels};
+  const frameIndex = useMemo(
+    () => observationFrames(observations),
+    [observations],
+  );
+  const vref = useRef<HTMLVideoElement>(null);
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const rows = useRef(frameIndex);
+  const display = useRef({ selectedTrack, boxMode, identityLabels, actions });
+  display.current = { selectedTrack, boxMode, identityLabels, actions };
   const redraw = useRef<((t: number) => void) | null>(null);
   const lastEmitted = useRef<number | null>(null);
   rows.current = frameIndex;
-  const [error, setError] = useState(""),
-    [playing, setPlaying] = useState(false);
+
+  const [error, setError] = useState("");
+  const [playing, setPlaying] = useState(false);
+
   useEffect(() => {
+    const v = vref.current;
     setError("");
     setPlaying(false);
     lastEmitted.current = null;
+    return () => {
+      if (v && !v.paused) v.pause();
+    };
   }, [src]);
+
   useEffect(() => {
     const v = vref.current;
     if (
@@ -54,10 +79,11 @@ export function VideoStage({
       try {
         v.currentTime = Math.max(0, Math.min(duration, time));
       } catch {
-        setError("尚未加载视频时间信息，请稍后重试定位");
+        if (v.readyState > 0) setError("尚未加载视频时间信息，请稍后重试定位");
       }
     }
   }, [time, duration, src]);
+
   useEffect(() => {
     const v = vref.current;
     if (!v) return;
@@ -71,18 +97,37 @@ export function VideoStage({
       const ctx = c.getContext("2d");
       if (!ctx) return;
       ctx.clearRect(0, 0, c.width, c.height);
-      const options=display.current;
-      const visible=options.boxMode==='hidden'?[]:visibleObservations(rows.current,mediaTime).filter(o=>options.boxMode!=='single'||o.track_id===options.selectedTrack);
-      c.dataset.visibleTracks=String(visible.length);
-      for(const o of visible){
-        const b=projectBox(o,c.width,c.height),focused=o.track_id===options.selectedTrack;
-        ctx.strokeStyle=focused?'#ffd25d':'#30e0df';ctx.lineWidth=focused?3:1.5;
-        ctx.globalAlpha=options.selectedTrack&&!focused ? .55 : 1;
-        ctx.strokeRect(b.x,b.y,b.width,b.height);ctx.font='12px system-ui';
-        const name=personLabel(options.identityLabels,o.track_id,mediaTime);const width=ctx.measureText(name).width+8;const x=Math.min(b.x,Math.max(0,c.width-width));const y=Math.max(16,b.y);
-        ctx.fillStyle=focused?'#6c347c':'#16353dcc';ctx.fillRect(x,y-16,width,17);ctx.fillStyle='#fff';ctx.fillText(name,x+4,y-3);
+      const options = display.current;
+      const visible =
+        options.boxMode === "hidden"
+          ? []
+          : visibleObservations(rows.current, mediaTime).filter(
+              (o) =>
+                options.boxMode !== "single"||
+                o.track_id === options.selectedTrack,
+            );
+      c.dataset.visibleTracks = String(visible.length);
+      for (const o of visible) {
+        const b = projectBox(o, c.width, c.height);
+        const focused = o.track_id === options.selectedTrack;
+        ctx.strokeStyle = focused ? "#ffd25d": "#30e0df";
+        ctx.lineWidth = focused ? 3 : 1.5;
+        ctx.globalAlpha = options.selectedTrack && !focused ? 0.55 : 1;
+        ctx.strokeRect(b.x, b.y, b.width, b.height);
+        ctx.font = "600 12px system-ui, -apple-system, sans-serif";
+        const name = personLabel(options.identityLabels, o.track_id, mediaTime);
+        const action = playbackActionAt(options.actions, o.sourceTrackId ?? o.track_id, mediaTime);
+        const shortAction = action.length > 20 ? action.slice(0, 19) + "…" : action;
+        const caption = `${shortAction} · ${name}`;
+        const width = Math.min(c.width, ctx.measureText(caption).width + 10);
+        const x = Math.min(b.x, Math.max(0, c.width - width));
+        const y = Math.max(18, b.y);
+        ctx.fillStyle = focused ? "#6c347c": "rgba(22, 53, 61, 0.85)";
+        ctx.fillRect(x, y - 18, width, 18);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(caption, x + 5, y - 5, Math.max(1, width - 10));
       }
-      ctx.globalAlpha=1;
+      ctx.globalAlpha = 1;
     };
     redraw.current = draw;
     const listener = () => draw(v.currentTime);
@@ -113,10 +158,12 @@ export function VideoStage({
       redraw.current = null;
     };
   }, [src]);
+
   useEffect(() => {
     if (vref.current && !vref.current.seeking)
       redraw.current?.(vref.current.currentTime);
-  }, [observations, time,selectedTrack,boxMode,identityLabels]);
+  }, [observations, time, selectedTrack, boxMode, identityLabels, actions]);
+
   async function toggle() {
     const v = vref.current;
     if (!v) return;
@@ -124,20 +171,21 @@ export function VideoStage({
       if (v.paused) await v.play();
       else v.pause();
     } catch (e) {
-      setError("浏览器未能播放，请重试：" + String(e));
+      setError("浏览器未能播放，请重试："+ String(e));
     }
   }
+
   return (
-    <section className="stage" aria-label="课堂录像">
-      <div
-        className="stage__frame stage__frame--video"
-        style={{ position: "relative" }}
-      >
+    <section
+      aria-label="课堂录像"
+      className="overflow-hidden rounded-t-2xl bg-[#130c17]"
+    >
+      <div className="relative aspect-video max-h-[54vh] w-full overflow-hidden bg-[#130c17]">
         {src ? (
           <video
             ref={vref}
             data-testid="classroom-video"
-            className="stage__video"
+            className="h-full w-full object-contain"
             src={src}
             playsInline
             preload="metadata"
@@ -147,24 +195,27 @@ export function VideoStage({
             }}
             onPlay={() => setPlaying(true)}
             onPause={() => setPlaying(false)}
-            onLoadedMetadata={() => {
-              if (
-                vref.current &&
-                Math.abs(vref.current.duration - duration) > 0.2
-              )
-                setError("浏览器时长与登记时长不一致，请核查视频时间基");
+            onLoadedMetadata={(e) => {
+              const video = e.currentTarget;
+              if (Number.isFinite(time)) video.currentTime = Math.max(0, Math.min(duration, time));
+              setError(Math.abs(video.duration - duration) > 0.2
+                ? "浏览器时长与登记时长不一致，请核查视频时间基"
+                : "");
+              onMediaError?.("");
             }}
-            onError={() =>
-              setError(
-                "真实媒体加载失败，请检查登录、源文件及浏览器编码。可以刷新后重试。",
-              )
-            }
+            onError={() => {
+              const message = "真实媒体加载失败，请检查登录、源文件及浏览器编码。";
+              setError(message);
+              onMediaError?.(message);
+            }}
           />
         ) : (
-          <div className="stage__note">
-            当前没有可播放的服务器录像，请先导入。
+          <div className="flex h-full w-full flex-col items-center justify-center gap-2 p-6 text-center text-sm text-[#b7a4be]">
+            <Video size={28} className="opacity-50"/>
+            <p>当前没有可播放的服务器录像，请先导入。</p>
           </div>
         )}
+
         <canvas
           ref={canvas}
           data-testid="track-overlay"
@@ -173,45 +224,89 @@ export function VideoStage({
             inset: 0,
             width: "100%",
             height: "100%",
-            pointerEvents: onSelectTrack?'auto':"none",
-            cursor:onSelectTrack?'pointer':undefined,
+            pointerEvents: onSelectTrack ? "auto": "none",
+            cursor: onSelectTrack ? "pointer": undefined,
           }}
-          onClick={e=>{const c=canvas.current,v=vref.current;if(!c||!v||!onSelectTrack||boxMode==='hidden')return;const rect=c.getBoundingClientRect(),x=e.clientX-rect.left,y=e.clientY-rect.top;const hit=visibleObservations(rows.current,v.currentTime).map(o=>({o,b:projectBox(o,c.width,c.height)})).filter(({o,b})=>(boxMode!=='single'||o.track_id===selectedTrack)&&x>=b.x&&x<=b.x+b.width&&y>=b.y&&y<=b.y+b.height).sort((a,b)=>a.b.width*a.b.height-b.b.width*b.b.height)[0];if(hit)onSelectTrack(hit.o.track_id);}}
+          onClick={(e) => {
+            const c = canvas.current;
+            const v = vref.current;
+            if (!c || !v || !onSelectTrack || boxMode === "hidden") return;
+            const rect = c.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            const hit = visibleObservations(rows.current, v.currentTime)
+              .map((o) => ({ o, b: projectBox(o, c.width, c.height) }))
+              .filter(
+                ({ o, b }) =>
+                  (boxMode !== "single"|| o.track_id === selectedTrack) &&
+                  x >= b.x &&
+                  x <= b.x + b.width &&
+                  y >= b.y &&
+                  y <= b.y + b.height,
+              )
+              .sort(
+                (a, b) => a.b.width * a.b.height - b.b.width * b.b.height,
+              )[0];
+            if (hit) onSelectTrack(hit.o.track_id);
+          }}
         />
-        <div className="stage__badges">
-          <span className="stage__cam">
-            <Icon name="camera" size={13} />
+
+        {/* Top-left camera badge */}
+        <div className="pointer-events-none absolute top-3 left-3 flex items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-[#1a0f21]/80 px-2.5 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
+            <Video size={12} className="text-[#e076c1]"/>
             {label}
           </span>
         </div>
-        <div className="stage__hint">{boxMode==='all'?'显示全部人物，点击框可单独查看':boxMode==='single'?'仅显示所选人物':'人物框已隐藏'}</div>
+
+        {/* Bottom-right overlay hint */}
+        <div className="pointer-events-none absolute right-3 bottom-3 rounded-full bg-[#1a0f21]/80 px-2.5 py-1 text-[11px] text-[#f0e5f2] backdrop-blur-sm">
+          {boxMode === "all"
+            ? "显示全部人物，点击框可单独查看"
+            : boxMode === "single"
+              ? "仅显示所选人物"
+              : "人物框已隐藏"}
+        </div>
       </div>
-      {error && (
-        <p role="alert" className="upload__error">
-          {error}
-          <button
-            className="btn btn--ghost"
-            onClick={() => vref.current?.load()}
+
+      {error ? (
+        <div className="bg-white p-3">
+          <AlertBanner
+            tone="danger"
+            action={
+              <button
+                type="button"
+                className={btnClass("ghost", "sm")}
+                onClick={() => vref.current?.load()}
+              >
+                <RotateCcw size={13} />
+                重试播放
+              </button>
+            }
           >
-            重试播放
-          </button>
-        </p>
-      )}
-      <div className="stage__bar">
+            {error}
+          </AlertBanner>
+        </div>
+      ) : null}
+
+      {/* Cinema Transport Bar */}
+      <div className="flex items-center gap-3 border-t border-[#2d1e36] bg-[#1b1122] px-4 py-2.5 text-white">
         <button
           type="button"
-          className="stage__play"
-          aria-label={playing ? "暂停" : "播放"}
+          aria-label={playing ? "暂停": "播放"}
           onClick={() => void toggle()}
           disabled={!src}
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#992777] text-white transition hover:bg-[#ab2a84] disabled:opacity-40"
         >
-          <Icon name={playing ? "pause" : "play"} size={16} />
+          {playing ? <Pause size={15} /> : <Play size={15} className="ml-0.5"/>}
         </button>
-        <span className="stage__time tabular">
-          {fmt(time)} / {fmt(duration)}
+
+        <span className="tabular shrink-0 text-xs font-medium text-[#e9dced]">
+          {fmt(time)} <span className="text-[#8e7496]">/</span> {fmt(duration)}
         </span>
+
         <input
-          className="product-seek"
+          className="lt-range flex-1"
           aria-label="视频时间定位"
           type="range"
           min="0"
@@ -220,7 +315,10 @@ export function VideoStage({
           value={Math.min(time, duration)}
           onChange={(e) => onSeek(Number(e.target.value))}
         />
-        <span className="faint">局部秒</span>
+
+        <span className="hidden sm:inline shrink-0 text-[11px] text-[#a18ea8]">
+          局部秒
+        </span>
       </div>
     </section>
   );

@@ -25,5 +25,5 @@ if __name__=='__main__':
     else:
         from src.context.app import create_context_app
         import uvicorn
-        runtime=json.loads(Path(a.runtime).read_text());runtime['attribution_db']=a.attribution_db
+        runtime=load_runtime(a.runtime);runtime['attribution_db']=a.attribution_db
         uvicorn.run(create_context_app(runtime,a.private_dir,a.identity_private_dir),host='127.0.0.1',port=a.port,access_log=False)

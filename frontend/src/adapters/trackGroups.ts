@@ -1,4 +1,5 @@
 import type {Track,TrackObservation} from '../models/backend';
+import type {PlaybackObservation} from './video';
 import type {TrackGroup} from '../api/workbench';
 import type {IdentityLabel} from '../api/workbench';
 export const canonicalTrack=(id:number,groups:TrackGroup[])=>groups.find(g=>g.track_ids.includes(id))?.track_ids[0]??id;
@@ -21,13 +22,13 @@ export function groupedTracks(tracks:Track[],groups:TrackGroup[]):Track[]{
  return [...result.values()].map(t=>({...t,segments:t.segments.sort((a,b)=>a.local_start-b.local_start)}));
 }
 /** Collapse only overlapping duplicate boxes of an explicit group at the same frame. */
-export function groupedObservations(rows:TrackObservation[],groups:TrackGroup[]):TrackObservation[]{
- const kept:TrackObservation[]=[];
+export function groupedObservations(rows:TrackObservation[],groups:TrackGroup[]):PlaybackObservation[]{
+ const kept:PlaybackObservation[]=[];
  for(const row of [...rows].sort((a,b)=>b.confidence-a.confidence)){
   const id=canonicalTrack(row.track_id,groups);
   const duplicate=kept.some(p=>p.frame_index===row.frame_index&&Math.abs(p.local_timestamp-row.local_timestamp)<.000001&&p.track_id===id&&memberTracks(id,groups).length>1&&
     Math.max(0,Math.min(p.bbox_x2,row.bbox_x2)-Math.max(p.bbox_x1,row.bbox_x1))*Math.max(0,Math.min(p.bbox_y2,row.bbox_y2)-Math.max(p.bbox_y1,row.bbox_y1)) / Math.max(1,Math.min((p.bbox_x2-p.bbox_x1)*(p.bbox_y2-p.bbox_y1),(row.bbox_x2-row.bbox_x1)*(row.bbox_y2-row.bbox_y1)))>.75);
-  if(!duplicate)kept.push({...row,track_id:id});
+  if(!duplicate)kept.push({...row,track_id:id,sourceTrackId:row.track_id});
  }
  return kept;
 }

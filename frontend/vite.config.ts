@@ -1,11 +1,12 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
-export default defineConfig(({mode})=>({
-  define:{__PRODUCT__:JSON.stringify(mode==='product')},
+export default defineConfig(({ mode }) => ({
+  define: { __PRODUCT__: JSON.stringify(mode === "product") },
   // 与后端技术页隔离，开发代理和正式部署均使用 /app/。
   base: "/app/",
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   server: {
     host: "127.0.0.1",
     port: 5173,

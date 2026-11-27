@@ -16,8 +16,10 @@ export function observationAt(rows: TrackObservation[], time: number) {
   );
 }
 
-export function observationFrames(rows:TrackObservation[]){
- const frames=new Map<number,TrackObservation[]>();
+export type PlaybackObservation = TrackObservation & { sourceTrackId?: number };
+
+export function observationFrames(rows:PlaybackObservation[]){
+ const frames=new Map<number,PlaybackObservation[]>();
  for(const row of rows){if(row.tracker_state!=='matched_visible_detection')continue;const items=frames.get(row.local_timestamp)||[];items.push(row);frames.set(row.local_timestamp,items);}
  return {times:Array.from(frames.keys()).sort((a,b)=>a-b),frames};
 }

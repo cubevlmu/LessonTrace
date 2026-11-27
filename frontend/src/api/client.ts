@@ -3,6 +3,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    public detail?: unknown,
   ) {
     super(message);
   }
@@ -15,18 +16,23 @@ const labels: Record<number, string> = {
   503: "服务暂不可用",
 };
 export function responseError(status: number, body: unknown) {
-  const detail =
+  const rawDetail =
     body && typeof body === "object" && "detail" in body
-      ? JSON.stringify(body.detail)
+      ? (body as { detail: unknown }).detail
+      : undefined;
+  const detail =
+    rawDetail !== undefined
+      ? JSON.stringify(rawDetail)
       : String(body || "");
   return new ApiError(
     status,
     `${labels[status] || "请求未完成"}${detail ? "：" + detail : ""}`,
+    rawDetail,
   );
 }
 export async function request<T>(
   path: string,
-  schema: z.ZodType<T>,
+  schema: z.ZodType<T, z.ZodTypeDef, unknown>,
   body?: unknown,
   method?: string,
 ): Promise<T> {

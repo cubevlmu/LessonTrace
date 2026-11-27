@@ -33,13 +33,15 @@ export function personLabel(labels:IdentityLabel[],trackId:number,time:number){
  const people=Array.from(new Set(chosen.map(b=>b.subject_id)));
  if(people.length>1)return fallback+' · 关联冲突';
  const name=chosen[0]?.display_name;
- return name?name+(confirmed.length?'':registered.length?(chosen[0].source_kind==='demo_setup_track_label'?' · 演示标记':' · 轨迹登记'):' · AI候选'):fallback;
+ if(!name)return fallback;
+ if(confirmed.length||chosen[0].source_kind==='demo_setup_track_label')return name;
+ return name+(registered.length?' · 轨迹登记':' · AI候选');
 }
 /** Stable demo roster name in a row/selector; video overlays remain time-scoped. */
 export function personTrackLabel(labels:IdentityLabel[],trackId:number,time:number){
  const active=labels.filter(l=>l.track_id===trackId&&l.local_start<=time&&time<=l.local_end);
  if(active.length)return personLabel(labels,trackId,time);
  const demo=labels.filter(l=>l.track_id===trackId&&l.status==='track_label'&&l.source_kind==='demo_setup_track_label');
- if(new Set(demo.map(l=>l.subject_id)).size===1)return demo[0].display_name+' · 演示标记';
+ if(new Set(demo.map(l=>l.subject_id)).size===1)return demo[0].display_name;
  return personLabel(labels,trackId,time);
 }

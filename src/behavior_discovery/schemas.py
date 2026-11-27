@@ -4,7 +4,7 @@ from src.attribution.schemas import ActorJudgment
 from src.agent.claim_evidence_alignment import ACTION_REQUIREMENTS
 
 VERSION='discovery-v1'
-PROMPT_VERSION='blind-track-discovery-v1.5-visible-posture-and-partial-target'
+PROMPT_VERSION='blind-track-discovery-v1.6-target-panel-and-local-frame-refs'
 CLASSIFICATION_PROMPT_VERSION='discovery-classification-v1.7-bounded'
 
 
@@ -14,7 +14,7 @@ class Input(BaseModel):
 
 class Config(Input):
     processing_profile:Literal['standard','efficient']='standard'
-    analysis_mode:Literal['sampled','full_timeline']='sampled'
+    analysis_mode:Literal['sampled','full_timeline','lesson_sample']='sampled'
     timeline_window_seconds:float=Field(2,ge=.5,le=4)
     window_seconds:float=Field(6,ge=4,le=8)
     overlap:float=Field(.5,ge=0,le=.75)

@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from src.agent.fusion.evidence import version
 from src.identity.store import uid,now
+from src.runtime_paths import data_path, stored_path
+from src.tracking.video import sha256
 from .repository import Repository
 from .ingest import MEDIA_ROOT
 
@@ -59,16 +61,26 @@ class DiscoveryService:
         return {'status':'deleted','original_retained':True,'history_retained':True,'playback_cache_removed':True}
 
 
+def verified_frame_path(frame, project_root=None):
+    base = project_root / 'data' if project_root is not None else data_path()
+    root = (base / 'analysis_private' / 'evidence').resolve()
+    try:
+        path = stored_path(frame['files']['input_combined'])
+    except ValueError:
+        return None
+    if root in path.parents and path.is_file() and sha256(path)==frame['sha256']['input_combined']:
+        return path
+    return None
+
+
 def evidence(service,rid,a,b,tid=None):
+    from src.agent.fusion.coverage import valid_observation_result
     with service.repo.connection() as c:
         if not c.execute("SELECT 1 FROM sqlite_master WHERE name='analysis_videos'").fetchone():return []
     repo=Repository(service.repo);result=[]
     for e in repo.events(rid):
-        history=e['human_review_history'];frames=e['frames'];valid=True
-        for f in frames:
-            path=Path(f['files']['input_combined']).resolve();root=Path(__file__).resolve().parents[2]/'data/analysis_private/evidence'
-            from src.tracking.video import sha256
-            if root.resolve() not in path.parents or not path.exists() or sha256(path)!=f['sha256']['input_combined']:valid=False
+        history=e['human_review_history'];frames=e['frames']
+        valid=all(verified_frame_path(f) is not None for f in frames)
         scoped=[f for f in frames if a<=f['global_time']<=b]
         in_scope=all(a<=t<=b for t in e['observed_time_support'])
         p={'event_id':e['event_id'],'action':e['action_category'],'source_kind':'model_discovered_event','run_id':rid,'track_id':e['track_id'],
@@ -91,19 +103,71 @@ def evidence(service,rid,a,b,tid=None):
                     'verification_status':'supported' if h['status']=='confirmed' and valid else ('contradicted' if h['status']=='rejected' else 'uncertain'),
                     'provenance':hp,'source_version':version(h)})
     with service.repo.connection() as c:windows=c.execute("SELECT * FROM discovery_windows WHERE run_id=? AND status='completed' AND start<=? AND end>=?",(rid,b,a)).fetchall()
+    clip_id=None
+    direct_tracks=set()
     for row in windows:
         if tid and tid!=row['track_id']:continue
-        payload=json.loads(row['payload']).get('result',{})
+        payload=valid_observation_result(row['payload'])
+        if payload is None:continue
+        if clip_id is None:clip_id=service.source.run(rid)[1]['clip_id']
         for i,obs in enumerate(payload.get('observations',{}).get('observed_actions',[])):
             refs=[f for f in payload['frames'] if f['frame_id'] in obs['evidence_refs'] and a<=f['global_time']<=b]
             if not refs:continue
-            from src.tracking.video import sha256
-            root=(Path(__file__).resolve().parents[2]/'data/analysis_private/evidence').resolve()
-            accessible=all(root in Path(f['files']['input_combined']).resolve().parents and Path(f['files']['input_combined']).is_file() and sha256(f['files']['input_combined'])==f['sha256']['input_combined'] for f in refs)
-            p={'action':'unknown','final_decision':'uncertain','run_id':rid,'track_id':row['track_id'],'segment_id':row['segment_id'],'clip_id':service.source.run(rid)[1]['clip_id'],'global_offset':0.,
+            direct_tracks.add(row['track_id'])
+            accessible=all(verified_frame_path(f) is not None for f in refs)
+            p={'action':'unknown','final_decision':'uncertain','run_id':rid,'track_id':row['track_id'],'segment_id':row['segment_id'],'clip_id':clip_id,'global_offset':0.,
                 'observation_limitations':payload.get('observations',{}).get('limitations',[]),
                 'frame_refs':[f['frame_id'] for f in refs],'sampled_frames_valid':accessible,'scope':'blind_description_no_reliable_category_or_confirmed_actor','source_kind':'model_discovered_event'}
             result.append({'evidence_id':'discovery_observation:'+row['window_id']+':'+str(i),'evidence_type':'vlm_observation','source_id':row['window_id'],
                 'subject_ref':None,'time_scope':[min(f['global_time'] for f in refs),max(f['global_time'] for f in refs)],'content':obs['action'],
                 'verification_status':'uncertain','provenance':p,'source_version':version([payload,p])})
+    # Carry forward the latest prior state within the same visible tracking segment
+    # when a queried interval falls between discrete state-change observations.
+    track_segments={}
+    try:
+        for tr in service.source.tracks(rid):
+            if tid is None or tr['track_id']==tid:
+                track_segments[tr['track_id']]=tr.get('segments',[])
+    except Exception:
+        track_segments={}
+    carry_candidates={}
+    if track_segments:
+        sql="SELECT * FROM discovery_windows WHERE run_id=? AND status='completed' AND start<=?"
+        args=[rid,a]
+        if tid is not None:
+            sql+=" AND track_id=?"
+            args.append(tid)
+        with service.repo.connection() as c:prior_windows=c.execute(sql,args).fetchall()
+        eps=0.002
+        for row in prior_windows:
+            track_id=row['track_id']
+            if track_id in direct_tracks:continue
+            segs=track_segments.get(track_id) or []
+            active_seg=next((s for s in segs if s['global_start']-eps<=a<=s['global_end']+eps),None)
+            if not active_seg:continue
+            payload=valid_observation_result(row['payload'])
+            if payload is None:continue
+            limitations=payload.get('observations',{}).get('limitations',[])
+            if any('not visible' in str(t).lower() or '不可见' in str(t) for t in limitations):continue
+            for i,obs in enumerate(payload.get('observations',{}).get('observed_actions',[])):
+                refs=[f for f in payload['frames'] if f['frame_id'] in obs['evidence_refs'] and active_seg['global_start']-eps<=f['global_time']<a]
+                if not refs:continue
+                origin_time=max(f['global_time'] for f in refs)
+                prev=carry_candidates.get(track_id)
+                entry=(origin_time,row,payload,i,obs,refs,active_seg)
+                if prev is None or origin_time>prev[0][0]+eps:
+                    carry_candidates[track_id]=[entry]
+                elif abs(origin_time-prev[0][0])<=eps:
+                    prev.append(entry)
+        for entries in carry_candidates.values():
+            for origin_time,row,payload,i,obs,refs,active_seg in entries:
+                if clip_id is None:clip_id=service.source.run(rid)[1]['clip_id']
+                accessible=all(verified_frame_path(f) is not None for f in refs)
+                p={'action':'unknown','final_decision':'uncertain','run_id':rid,'track_id':row['track_id'],'segment_id':row['segment_id'],'clip_id':clip_id,'global_offset':0.,
+                    'observation_limitations':payload.get('observations',{}).get('limitations',[]),
+                    'frame_refs':[f['frame_id'] for f in refs],'sampled_frames_valid':accessible,'carried_forward':True,'origin_time':origin_time,
+                    'scope':'blind_description_no_reliable_category_or_confirmed_actor','source_kind':'model_discovered_event'}
+                result.append({'evidence_id':'discovery_observation:'+row['window_id']+':'+str(i),'evidence_type':'vlm_observation','source_id':row['window_id'],
+                    'subject_ref':None,'time_scope':[origin_time,min(b,active_seg['global_end'])],'content':obs['action'],
+                    'verification_status':'uncertain','provenance':p,'source_version':version([payload,p])})
     return result

@@ -1,12 +1,13 @@
 import json
 from pathlib import Path
+from src.runtime_paths import data_path
 from fastapi import Depends,File,UploadFile,HTTPException
 from fastapi.responses import FileResponse
 from starlette.concurrency import run_in_threadpool
 from src.identity.store import uid,secure_directory
 from src.agent.fusion.planning import ReviewRequest
 from .schemas import Start,Control,ReportOptions
-from .service import DiscoveryService
+from .service import DiscoveryService,verified_frame_path
 from .ingest import ingest
 from .jobs import create,launch,control
 
@@ -19,7 +20,7 @@ def mount(app,context,agent,account,writer):
     def page():return FileResponse(ROOT/'webui/analyze.html',media_type='text/html')
     @app.post('/api/context/analysis/videos',status_code=201)
     async def upload(file:UploadFile=File(...),a=Depends(writer)):
-        folder=secure_directory(ROOT/'data/analysis_private/uploads');temp=folder/(uid()+'.partial');size=0
+        folder=secure_directory(data_path('analysis_private', 'uploads'));temp=folder/(uid()+'.partial');size=0
         try:
             with temp.open('xb') as out:
                 while chunk:=await file.read(1024*1024):
@@ -40,8 +41,8 @@ def mount(app,context,agent,account,writer):
     def start(body:Start,a=Depends(writer)):
         import os
         if os.getenv('INTICLASS_PROFILE')=='product':
-            full=body.config.analysis_mode=='full_timeline'
-            body=body.model_copy(update={'config':body.config.model_copy(update={'device':os.getenv('INTICLASS_ANALYSIS_DEVICE','cpu'),'timeout':float(os.getenv('INTICLASS_VLM_TIMEOUT','240')),'frames':4 if full else 2,'input_long_edge':512 if full else 320})})
+            four_frames=body.config.analysis_mode in {'full_timeline','lesson_sample'}
+            body=body.model_copy(update={'config':body.config.model_copy(update={'device':os.getenv('INTICLASS_ANALYSIS_DEVICE','cpu'),'timeout':float(os.getenv('INTICLASS_VLM_TIMEOUT','240')),'frames':4 if four_frames else 2,'input_long_edge':512 if four_frames else 320})})
         j,fresh=create(context,body,a['actor'])
         if fresh:launch(j['job_id'])
         return {'job':j,'created':fresh}
@@ -82,9 +83,8 @@ def mount(app,context,agent,account,writer):
         if svc.repo.video(job['video_id'],a['actor'])['status']!='active':raise ValueError('analysis_video_deleted')
         f=next((f for f in json.loads(r['payload']).get('result',{}).get('frames',[]) if f['frame_id']==fid),None)
         if not f:raise ValueError('window_evidence_frame_missing')
-        from src.tracking.video import sha256
-        path=Path(f['files']['input_combined']).resolve();root=(ROOT/'data/analysis_private/evidence').resolve()
-        if root not in path.parents or not path.is_file() or sha256(path)!=f['sha256']['input_combined']:raise ValueError('evidence_frame_missing_or_modified')
+        path=verified_frame_path(f)
+        if path is None:raise ValueError('evidence_frame_missing_or_modified')
         return FileResponse(path,media_type='image/jpeg')
     @app.get('/api/context/analysis/frames/{event_id}/{frame_id}')
     def frame(event_id:str,frame_id:str,a=Depends(account)):
@@ -94,9 +94,8 @@ def mount(app,context,agent,account,writer):
         if svc.repo.video(e['video_id'],a['actor'])['status']!='active':raise ValueError('analysis_video_deleted')
         f=next((f for f in e['frames'] if f['frame_id']==frame_id),None)
         if not f:raise ValueError('evidence_frame_missing')
-        path=Path(f['files']['input_combined']).resolve();allowed=(ROOT/'data/analysis_private/evidence').resolve()
-        from src.tracking.video import sha256
-        if allowed not in path.parents or not path.exists() or sha256(path)!=f['sha256']['input_combined']:raise ValueError('evidence_frame_missing_or_modified')
+        path=verified_frame_path(f)
+        if path is None:raise ValueError('evidence_frame_missing_or_modified')
         return FileResponse(path,media_type='image/jpeg')
     @app.post('/api/context/analysis/jobs/{jid}/report',status_code=201)
     def report(jid:str,body:ReportOptions|None=None,a=Depends(writer)):

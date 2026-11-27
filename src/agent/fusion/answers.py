@@ -3,10 +3,18 @@ from .relevance import CONFLICTS
 from .observation_summary import observation_summary
 
 
+def cognitive_boundary(plan):
+    boundary = '单凭这段录像，无法判断学生是否专心或听懂。对其动机、学习能力和学习效果的判断也保持未知。'
+    if plan.effective_time_range is None:
+        boundary = '所选真实片段不覆盖请求时间，无法判断学生是否专心或听懂；缺失不等于没有发生。'
+    check = '可以请学生用自己的话解释刚才的一步，再对照实际作答决定是否需要再讲。'
+    return boundary, check
+
+
 def direct(plan,claims,evidence,risks,retrieved):
     kinds={e['evidence_type'] for e in evidence};intent=plan.intent
+    if intent=='cognitive_boundary':return ''.join(cognitive_boundary(plan))
     if plan.effective_time_range is None:return '所选真实片段不覆盖请求时间，无法判断是否发生相关行为；缺失不等于没有发生。'
-    if intent=='cognitive_boundary':return '不能。外显动作、轨迹及教学计划不能证明学生专注、动机、能力或学习效果；这类判断保持未知。无需通过追加姿态帧推断心理状态。'
     if intent=='track_timeline':
         tracks=[e for e in evidence if e['evidence_type']=='person_track']
         if not tracks:answer='所选时间内没有该Track的实际观测，不能推断其在其他时刻不存在。'
@@ -62,6 +70,18 @@ def assemble(request,plan,retrieved,canonical,adjudication,model,verification,re
     selected_refs={r for c in claims+additional for r in c['evidence_refs']}|{r for risk in relevant for r in risk['evidence_refs']}
     evidence=[e for e in retrieved['evidence'] if e['evidence_id'] in selected_refs]
     answer=direct(plan,claims,evidence,relevant,retrieved)
+    direct_refs=list(dict.fromkeys(r for c in claims for r in c['evidence_refs']))
+    checks={}
+    if plan.intent=='cognitive_boundary':
+        boundary,check=cognitive_boundary(plan)
+        rules={e['evidence_id'] for e in evidence if e['evidence_type']=='knowledge_rule'}
+        direct_refs=[ref for ref in direct_refs if ref in rules]
+        # Retrieval already applies actor, passage, document and classroom scope checks.
+        plans=[e for e in retrieved['evidence'] if e['evidence_type']=='teacher_plan'
+               and e['provenance'].get('source_kind')=='teacher_plan'
+               and (plan.material_mode!='selected' or e['provenance'].get('document_id') in plan.document_ids)]
+        checks={'boundary_text':boundary,'check_text':check,
+                'check_evidence_refs':list(dict.fromkeys(e['evidence_id'] for e in plans))}
     sources=[e for e in evidence if e['evidence_type'] in {'teacher_plan','teacher_report','teaching_activity'}]
     observations=[e for e in evidence if e['evidence_type'] in {'dataset_annotation','vlm_observation','human_visual_review','event_attribution','model_discovered_event','human_confirmed_event'}]
     sections=[{'heading':title,'claims':[c for c in claims if predicate(c)]} for title,predicate in [
@@ -70,7 +90,9 @@ def assemble(request,plan,retrieved,canonical,adjudication,model,verification,re
         ('个人行为归属',lambda c:c['category']=='people' and c['scope']!='observed_detection_segments_only_not_identity'),
         ('跨模态关系',lambda c:c['temporal_alignment_status']!='not_applicable'),('证据冲突',lambda c:any(set(c['evidence_refs'])&set(r['evidence_refs']) for r in conflicts)),
         ('人工待复核事项',lambda c:False),('分析限制',lambda c:c['category']=='limits'),('完整引用索引',lambda c:False)]] if plan.output_mode=='report' else []
-    return {'answer':answer,'direct_answer':{'text':answer,'evidence_refs':list(dict.fromkeys(r for c in claims for r in c['evidence_refs']))},
+    if checks:
+        evidence=evidence+[e for e in plans if e['evidence_id'] not in selected_refs]
+    return {'answer':answer,'direct_answer':{'text':answer,'evidence_refs':direct_refs},**checks,
         'recognition_records':observation_summary(claims,evidence),
         'output_mode':plan.output_mode,'query_plan':plan.model_dump(),'claims':claims,'additional_claims':additional,'evidence':evidence,'sections':sections,
         'classroom':{'run_id':plan.run_id,'clip_id':plan.clip_id,'lesson_id':plan.lesson_id,'time_range':plan.effective_time_range,'scope':'selected_registered_clip_only_not_assumed_complete_lesson'},

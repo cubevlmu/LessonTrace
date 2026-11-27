@@ -1,0 +1,252 @@
+@import "tailwindcss";
+
+/* ==========================================================================
+   课迹 LessonTrace — 广西师大紫色浅色主题设计令牌
+   主色 #992777 / 强调 #ab2a84，始终浅色温润纸面与深紫墨字
+   ========================================================================== */
+:root {
+  color-scheme: light;
+  --lt-bg: #faf7fb;
+  --lt-surface: #ffffff;
+  --lt-surface-subtle: #f7f1f8;
+  --lt-surface-sunken: #efe4f1;
+  --lt-border: #e8dce9;
+  --lt-border-strong: #d4bfd7;
+  --lt-ink: #231426;
+  --lt-ink-secondary: #4a3450;
+  --lt-muted: #6e5a74;
+
+  --lt-primary: #992777;
+  --lt-primary-hover: #7f1e62;
+  --lt-primary-light: #ab2a84;
+  --lt-primary-soft: #f7eaf3;
+  --lt-primary-border: #e3bed8;
+
+  --lt-accent: #6c347c;
+  --lt-accent-soft: #f1e8f5;
+
+  --font-sans: "Inter", "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", Consolas, ui-monospace, monospace;
+}
+
+@layer base {
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-sans);
+    background-color: var(--lt-bg);
+    color: var(--lt-ink);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    line-height: 1.55;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* ==========================================================================
+   Custom Styled <select> (replaces default browser combobox chrome)
+   ========================================================================== */
+select.lt-select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-color: #ffffff;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23992777' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.7rem center;
+  background-size: 15px 15px;
+  padding-right: 2.25rem;
+  cursor: pointer;
+}
+
+select.lt-select:hover:not(:disabled) {
+  border-color: #c898bc;
+  background-color: #fefbfe;
+}
+
+select.lt-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* ==========================================================================
+   Page Transition Animation
+   ========================================================================== */
+@keyframes lt-page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.lt-page-enter {
+  animation: lt-page-enter 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ==========================================================================
+   Native <dialog> with Smooth Open Animation
+   ========================================================================== */
+@keyframes lt-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes lt-backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+dialog.lt-dialog {
+  padding: 0;
+  margin: auto;
+  border: 1px solid var(--lt-border);
+  border-radius: 1rem;
+  background-color: var(--lt-surface);
+  color: var(--lt-ink);
+  box-shadow: 0 24px 64px -16px rgba(45, 16, 48, 0.28);
+  max-width: min(92vw, 42rem);
+  width: 100%;
+  max-height: 88vh;
+  overflow: hidden;
+}
+
+dialog.lt-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  animation: lt-dialog-in 210ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+dialog.lt-dialog::backdrop {
+  background: rgba(35, 20, 38, 0.45);
+  backdrop-filter: blur(4px);
+  animation: lt-backdrop-in 180ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lt-page-enter,
+  dialog.lt-dialog[open],
+  dialog.lt-dialog::backdrop {
+    animation: none;
+  }
+}
+
+/* ==========================================================================
+   Custom Range Input (Video & Timeline Scrubbing)
+   ========================================================================== */
+input[type="range"].lt-range {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type="range"].lt-range::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--lt-border-strong);
+}
+
+input[type="range"].lt-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--lt-primary);
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.32);
+  margin-top: -4px;
+  transition: transform 0.12s ease;
+}
+
+input[type="range"].lt-range::-webkit-slider-thumb:hover {
+  transform: scale(1.18);
+}
+
+input[type="range"].lt-range::-moz-range-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--lt-border-strong);
+}
+
+input[type="range"].lt-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--lt-primary);
+  border: 2px solid #ffffff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.32);
+}
+
+/* Printable paper report */
+.paper-sheet {
+  background-color: #ffffff;
+  color: #231426;
+}
+
+.report-print-sources {
+  display: none;
+}
+
+@media print {
+  header.lt-topbar,
+  nav.lt-sidebar,
+  aside.no-print,
+  .no-print {
+    display: none !important;
+  }
+
+  body,
+  main {
+    background: #ffffff !important;
+    color: #231426 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  .paper-sheet {
+    box-shadow: none !important;
+    border: none !important;
+    padding: 0 !important;
+  }
+
+  .report-print-sources {
+    display: block;
+    font-size: 0.8em;
+    overflow-wrap: anywhere;
+  }
+
+  .report-print-sources ul {
+    list-style: disc;
+    padding-inline-start: 1.2em;
+  }
+}

@@ -3,12 +3,15 @@ import hashlib
 import json
 import subprocess
 import os
+import shutil
+from filelock import FileLock
 from pathlib import Path
 from src.identity.store import secure_directory,now
 from src.tracking.video import probe,sha256
 
-ROOT=Path(__file__).resolve().parents[2]
-MEDIA_ROOT=ROOT/'data/analysis_private/media'
+from src.runtime_paths import data_path
+
+MEDIA_ROOT=data_path('analysis_private', 'media')
 
 
 def inspect(path):
@@ -22,28 +25,43 @@ def ingest(service,temp_path,filename,actor):
     if ext not in {'.mp4','.avi','.mov','.mkv'}:raise ValueError('unsupported_video_extension')
     path=Path(temp_path);digest=sha256(path)
     owner=hashlib.sha256(actor.encode()).hexdigest()[:20];vid='uploaded_'+hashlib.sha256((actor+':'+digest).encode()).hexdigest()[:24]
+    folder = secure_directory(MEDIA_ROOT / owner)
+    with FileLock(str(folder / (vid + '.import.lock'))):
+        return _import_video(service, path, filename, actor, digest, vid, folder)
+
+
+def _import_video(service, path, filename, actor, digest, vid, folder):
     with service.repo.connection() as c:old=c.execute('SELECT status FROM analysis_videos WHERE owner=? AND original_sha256=?',(actor,digest)).fetchone()
     if old:
         if old['status']!='active':raise ValueError('same_video_was_deleted; explicit_restore_not_implemented')
         path.unlink();return {'video_id':vid,'deduplicated':True}
     timing=inspect(path)
     if timing['duration']>7200 or timing['width']*timing['height']>3840*2160:raise ValueError('video_exceeds_two_hours_or_4k_import_limit')
-    folder=secure_directory(MEDIA_ROOT/owner);original=folder/(vid+ext+'.original');media=folder/(vid+'.mp4');partial=folder/(vid+'.partial.mp4')
-    import shutil
-    # Copy also supports a managed store on a different Windows volume.
-    with original.open('xb') as output,path.open('rb') as uploaded:shutil.copyfileobj(uploaded,output)
+    original = folder / (vid + Path(filename).suffix.lower() + '.original')
+    media = folder / (vid + '.mp4')
+    partial = folder / (vid + '.partial.mp4')
+    if original.exists():
+        if sha256(original) != digest:
+            raise ValueError('retained_original_hash_mismatch')
+    else:
+        # Atomic publication also works if the upload and evidence stores are on different volumes.
+        stage = original.with_suffix('.uploading')
+        try:
+            shutil.copyfile(path, stage)
+            stage.replace(original)
+        finally:
+            stage.unlink(missing_ok=True)
     path.unlink()
     try:
         command=['ffmpeg','-v','error','-y','-i',str(original),'-map','0:v:0','-an','-vf','setpts=PTS-STARTPTS',
-            '-fps_mode','passthrough','-c:v','libx264','-preset','ultrafast','-crf','20','-pix_fmt','yuv420p','-movflags','+faststart',str(partial)]
+            '-fps_mode','passthrough','-enc_time_base','1:1000000','-c:v','libx264','-preset','ultrafast','-crf','20','-pix_fmt','yuv420p','-movflags','+faststart',str(partial)]
         result=subprocess.run(command,capture_output=True,timeout=1800,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))
         if result.returncode:raise ValueError('video_transcode_failed:'+result.stderr.decode(errors='replace')[-300:])
         normalized=inspect(partial)
         if (timing['width'],timing['height'],len(timing['timestamps']))!=(normalized['width'],normalized['height'],len(normalized['timestamps'])):raise ValueError('media_derivative_dimensions_or_frame_count_changed')
         drift=max(abs(a-b) for a,b in zip(timing['timestamps'],normalized['timestamps']))
         if drift>.002:raise ValueError('media_derivative_pts_drift_exceeds_2ms')
-        partial.replace(media)
-        metadata={'filename':Path(filename).name,'original_sha256':digest,'processing_sha256':sha256(media),'original_path':str(original),
+        metadata={'filename':Path(filename).name,'original_sha256':digest,'processing_sha256':sha256(partial),'original_path':str(original),
             'media_path':str(media),'duration':normalized['duration'],'width':normalized['width'],'height':normalized['height'],
             'fps':normalized['median_fps_from_pts'],'vfr':normalized['vfr_detected'],'max_pts_drift':drift,
             'frame_count':normalized['decoded_frame_count'],'source_timebase':'first_decoded_PTS_origin','source_kind':'uploaded_recording',
@@ -53,7 +71,15 @@ def ingest(service,temp_path,filename,actor):
             'source_kind':'uploaded_recording','owner':actor,'processing_sha256':metadata['processing_sha256'],'original_sha256':digest}
         # Registered video metadata only. NO region_annotations / fake Excel events.
         import sqlite3
-        with sqlite3.connect(service.source.registry_db) as c:c.execute('INSERT INTO registered_clips(id,video_id,start,end,payload) VALUES (?,?,?,?,?)',(vid,vid,0.,clip['end'],json.dumps(clip)))
+        with sqlite3.connect(service.source.registry_db) as c:
+            # A prior interruption may have registered this owner's clip before publishing the video.
+            saved = c.execute('SELECT payload FROM registered_clips WHERE id=?', (vid,)).fetchone()
+            if saved and json.loads(saved[0]) != clip:
+                raise ValueError('retained_clip_registration_mismatch')
+            partial.replace(media)
+            if not saved:
+                c.execute('INSERT INTO registered_clips(id,video_id,start,end,payload) VALUES (?,?,?,?,?)',
+                          (vid, vid, 0., clip['end'], json.dumps(clip)))
         with service.repo.connection() as c:c.execute('INSERT INTO analysis_videos VALUES (?,?,?,?,?,?,?,?)',(vid,actor,digest,vid,'recording_'+vid,'active',now(),json.dumps(metadata)))
         return {'video_id':vid,'deduplicated':False,'metadata':{k:v for k,v in metadata.items() if not k.endswith('_path')}}
     except Exception:

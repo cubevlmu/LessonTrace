@@ -4,7 +4,7 @@ import math
 import sqlite3
 from pathlib import Path
 from collections import OrderedDict
-from src.tracking.video import registered_clip, safe_path, sha256, decode_frames
+from src.tracking.video import registered_clip, safe_path, sha256, decode_frames, decode_at_recorded_pts
 
 
 class TrackAccess:
@@ -81,22 +81,34 @@ class TrackAccess:
                     if image.shape[:2]!=(o['frame_height'],o['frame_width']):raise ValueError('source_dimensions_changed')
                     self._frame_cache.move_to_end(key);found[index]=(image.copy(),o,run,clip)
         if len(found)==len(indices):return [found[i] for i in indices]
-        decoder=decode_frames(path)
-        try:
-            for data in decoder:
-                if data['frame_index'] not in observations or data['frame_index'] in found:continue
-                o=observations[data['frame_index']]
-                if abs(data['local_timestamp']-o['local_timestamp'])>.002 or abs(o['global_timestamp']-clip['start']-data['local_timestamp'])>.002:
-                    raise ValueError('observation_presentation_timestamp_mismatch')
-                image=data['frame'].to_ndarray(format='bgr24')
-                if image.shape[:2]!=(o['frame_height'],o['frame_width']): raise ValueError('source_dimensions_changed')
-                found[data['frame_index']]=(image,o,run,clip)
-                if self._frame_cache is not None and image.nbytes<=self._frame_cache_limit:
-                    key=(*prefix,data['frame_index']);self._frame_cache[key]=(image.copy(),data['local_timestamp']);self._frame_cache_bytes+=image.nbytes
-                    while self._frame_cache_bytes>self._frame_cache_limit:
-                        _,(pixels,_)=self._frame_cache.popitem(last=False);self._frame_cache_bytes-=pixels.nbytes
-                if len(found)==len(indices):break
-        finally:
-            decoder.close()
+        def collect(decoder):
+            try:
+                for data in decoder:
+                    if data['frame_index'] not in observations or data['frame_index'] in found:continue
+                    o=observations[data['frame_index']]
+                    if abs(data['local_timestamp']-o['local_timestamp'])>.002 or abs(o['global_timestamp']-clip['start']-data['local_timestamp'])>.002:
+                        raise ValueError('observation_presentation_timestamp_mismatch')
+                    image=data['frame'].to_ndarray(format='bgr24')
+                    if image.shape[:2]!=(o['frame_height'],o['frame_width']): raise ValueError('source_dimensions_changed')
+                    found[data['frame_index']]=(image,o,run,clip)
+                    if self._frame_cache is not None and image.nbytes<=self._frame_cache_limit:
+                        key=(*prefix,data['frame_index']);self._frame_cache[key]=(image.copy(),data['local_timestamp']);self._frame_cache_bytes+=image.nbytes
+                        while self._frame_cache_bytes>self._frame_cache_limit:
+                            _,(pixels,_)=self._frame_cache.popitem(last=False);self._frame_cache_bytes-=pixels.nbytes
+                    if len(found)==len(indices):break
+            finally:
+                decoder.close()
+
+        missing = [i for i in indices if i not in found]
+        # Near the start a sequential read is cheaper. Later windows can seek
+        # using the exact PTS persisted by the tracker, including for VFR media.
+        if min(missing) >= 64:
+            marks = ','.join('?' for _ in missing)
+            records = self.rows('SELECT frame_index,pts,time_base_num,time_base_den FROM tracking_frames '
+                                'WHERE run_id=? AND frame_index IN (' + marks + ')', (rid, *missing))
+            if len(records) == len(missing):
+                collect(decode_at_recorded_pts(path, records))
+        if len(found) != len(indices):
+            collect(decode_frames(path))
         if len(found)!=len(indices):raise ValueError('observed_frame_not_decodable')
         return [found[i] for i in indices]
