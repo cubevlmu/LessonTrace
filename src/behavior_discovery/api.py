@@ -101,4 +101,4 @@ def mount(app,context,agent,account,writer):
     def report(jid:str,body:ReportOptions|None=None,a=Depends(writer)):
         j=svc.repo.job(jid,a['actor'])
         if not j['run_id']:raise ValueError('tracking_not_complete')
-        return agent.ask_fusion(ReviewRequest(run_id=j['run_id'],question='生成这段课堂录像的复盘报告：概括动作记录、人物轨迹和教学资料，说明已分析范围。',document_ids=body.document_ids if body else [],use_llm=False),app.state.fusion,a['actor'],True)
+        return agent.ask_fusion(ReviewRequest(run_id=j['run_id'],question='生成这段课堂录像的复盘报告：概括动作记录、人物轨迹和教学资料，说明已分析范围。',report_template='lesson',document_ids=body.document_ids if body else [],use_llm=body.use_llm if body else True),app.state.fusion,a['actor'],True)

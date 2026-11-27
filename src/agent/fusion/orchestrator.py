@@ -138,7 +138,10 @@ class FusionWorkflow:
             report['_classroom_background']=retrieved['evidence']
             report['_writer_call_budget']=min(2,max_model_calls-model_calls)
             from .narrative import compose
-            compose(report,query,self.text_model,generate_text and bool(report['claims']) and model_calls<max_model_calls,
+            has_context = bool(report['claims']) or (query.output_mode=='report' and any(
+                e['evidence_type'] in {'teacher_plan','teacher_report','vlm_observation','human_confirmed_event'}
+                for e in retrieved['evidence']))
+            compose(report,query,self.text_model,generate_text and has_context and model_calls<max_model_calls,
                     min(120,remaining),lock_path)
             report.pop('_conversation',None);report.pop('_classroom_background',None);report.pop('_writer_call_budget',None)
         writer_record=report.get('narrative_generation',{});writer_calls=writer_record.get('actual_calls',int(writer_record.get('chat_attempted',False)))

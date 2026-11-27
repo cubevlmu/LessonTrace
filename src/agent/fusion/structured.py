@@ -7,6 +7,7 @@ from filelock import FileLock, Timeout
 
 from src.context import lesson_graph
 from src.inference import skills, statement_writer
+from src.inference.report_evidence import report_order
 from .evidence import version
 from .lesson_evidence import relation_ref
 from .narrative import HEADINGS
@@ -73,7 +74,10 @@ def _source(e):
             'title':p.get('title'), 'is_example':p.get('is_example',False),
             'content':e['content'][:3000], 'time_scope':e['time_scope'],
             'verification_status':e['verification_status'], 'source_scope':p.get('scope'),
-            'action':p.get('action'), 'relation_refs':p.get('relation_refs',[])}
+            'action':p.get('action'), 'track_id':p.get('track_id'), 'subject_ref':e.get('subject_ref'),
+            'sampled_frames_valid':p.get('sampled_frames_valid'), 'decision':p.get('final_decision'),
+            'observation_limitations':p.get('observation_limitations') or p.get('limitations') or [],
+            'relation_refs':p.get('relation_refs',[])}
 
 
 def _append(statements, plan, role, section, text, refs=(), queries=(), changes=()):
@@ -92,11 +96,17 @@ def _deterministic(statements, plan, sources):
               else (work or visual or material)[:2])
     for s in chosen:
         if s in visual:
-            action = s.get('action')
-            if not action or action=='unknown' or s['verification_status']=='contradicted':
+            if s['verification_status']=='contradicted':
                 continue
-            _append(statements,plan,'fact','observations',f"在所引时段 {s['time_scope']} 秒，记录中有外显动作 [{action}]；适用范围仅限引用。",
-                    [s['evidence_id']])
+            if plan.output_mode=='report' and s['evidence_type']=='vlm_observation' and s.get('sampled_frames_valid'):
+                from .observation_summary import readable_action
+                from src.agent.visual_evidence_policy import semantic_findings
+                text = readable_action(s['content'])[:220]
+                if text and not semantic_findings(text):
+                    _append(statements,plan,'fact','observations',f'所引画面记录描述为“{text}”。',[s['evidence_id']])
+            elif s.get('action') and s['action']!='unknown':
+                _append(statements,plan,'fact','observations',f"在所引时段 {s['time_scope']} 秒，记录中有外显动作 [{s['action']}]；适用范围仅限引用。",
+                        [s['evidence_id']])
         else:
             locator = ' · '+s['local_key'] if s.get('local_key') else ''
             intro = '演示资料' if s['is_example'] else '资料'
@@ -114,7 +124,8 @@ def _deterministic(statements, plan, sources):
 
 def compose(report, plan, request, retrieved, provider, history, events, reread, max_calls, timeout, lock_path):
     context = retrieved['lesson_context']
-    sources = [_source(e) for e in retrieved['evidence'] if e['evidence_type'] not in {'knowledge_rule','identity_binding'}
+    ordered = report_order(retrieved['evidence']) if plan.output_mode == 'report' else retrieved['evidence']
+    sources = [_source(e) for e in ordered if e['evidence_type'] not in {'knowledge_rule','identity_binding'}
                and (e['evidence_type']!='event_attribution' or e['verification_status']=='supported')]
     kinds = {v for s in sources for v in (s['source_kind'],s['item_kind'],s['evidence_type']) if v}
     work = bool(kinds & skills.ACADEMIC_SOURCE_KINDS)
@@ -133,7 +144,8 @@ def compose(report, plan, request, retrieved, provider, history, events, reread,
     priority = lambda s: (0 if s['source_kind'] in skills.ACADEMIC_SOURCE_KINDS else
                            1 if s['relation_refs'] or s['item_kind']=='goal' else
                            2 if s['evidence_type'] not in {'person_track','dataset_annotation'} else 3)
-    sources.sort(key=priority)
+    if plan.output_mode != 'report':
+        sources.sort(key=priority)
     packet = {'scope_key':plan.scope_key,'question':request.question,'output_mode':plan.output_mode,
               'student_scope':bool(plan.roster_subject_id or plan.subject_id),
               'allowed_sections':sorted(SECTIONS), 'sources':sources[:36],

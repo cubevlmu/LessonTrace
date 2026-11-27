@@ -1,5 +1,6 @@
 import json
 import sqlite3
+from collections import defaultdict, deque
 from contextlib import contextmanager
 from pathlib import Path
 from src.attribution.repository import AttributionRepository
@@ -95,9 +96,27 @@ def multimedia(service,request,actor):
     if not request.lesson_id and clip.get('source_kind')!='uploaded_recording':
         with service.repo.connection() as c:
             passages+=[dict(r) for r in c.execute('SELECT * FROM context_passages ORDER BY source_start') if r['document_id'] in docs]
-    passages=list({p['passage_id']:p for p in passages}.values())[:80]
-    passages=[p for p in passages if eligible(p['document_id']) and (docs[p['document_id']]['source_type']!='classroom_memory' or request.use_classroom_memory)]
-    if request.material_mode=='none':passages=[p for p in passages if docs[p['document_id']]['source_type']=='classroom_memory' and request.use_classroom_memory]
+    selected = set(request.document_ids)
+    def included(did):
+        if not eligible(did):
+            return False
+        if docs[did]['source_type']=='classroom_memory':
+            return request.use_classroom_memory and (did in selected or did in implicit)
+        if request.material_mode=='none':
+            return False
+        return did in selected if selected or request.material_mode=='selected' else True
+    relevant = [a for a in relevant if included(a['document_id'])]
+    by_document = defaultdict(deque)
+    for p in {p['passage_id']:p for p in passages}.values():
+        if included(p['document_id']):
+            by_document[p['document_id']].append(p)
+    queue = deque(by_document.values())
+    passages = []
+    while queue and len(passages)<80:
+        group = queue.popleft()
+        passages.append(group.popleft())
+        if group:
+            queue.append(group)
     events=[e for e in service.source.events(clip['video_id']) if e['t_end']>=start and e['t_start']<=end]
     tracks=service.source.tracks(request.run_id)
     if request.track_id is not None and not any(t['track_id']==request.track_id for t in tracks):raise ValueError('anonymous_track_not_in_run')

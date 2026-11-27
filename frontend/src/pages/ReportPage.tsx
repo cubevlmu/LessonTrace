@@ -86,10 +86,15 @@ function latestBlocks(report?: LessonReport | null) {
   return [...current.values()];
 }
 
-function versionLabel(block: ReportBlock) {
+function hasModelAnalysis(report: LessonReport) {
+  return ["success", "partial_success"].includes(report.generation?.status ?? "") &&
+    report.generation?.prompt_version !== "grounded-narrative-outline-v1";
+}
+
+function versionLabel(block: ReportBlock, report: LessonReport) {
   if (block.origin === "teacher_edited") return `教师修订（第${block.version}版）`;
   if (block.origin === "adopted") return `第${block.version}版采纳`;
-  return `助手撰写（第${block.version}版）`;
+  return `${hasModelAnalysis(report) ? "助手撰写" : "证据整理"}（第${block.version}版）`;
 }
 
 function ReportSources({report, refs, label, check, collapsed}: {
@@ -282,17 +287,17 @@ export function ReportPage() {
           use_llm: true,
         });
         apply(doc);
-        setMessage("固定范式报告已独立保存，不会覆盖课堂问答。");
+        setMessage("本次复盘已保存。");
       } else {
         if (!report) throw Error("请先生成报告");
         if (kind === "rebuild") {
           const updated = await createLessonReport({
             ...report.options,
             run_id: report.classroom.run_id,
-            use_llm: false,
+            use_llm: true,
           });
           apply(updated);
-          setMessage("已按原报告范围整理当前证据，另存为一份新报告。");
+          setMessage("已按原范围重新生成，另存为新报告。");
         } else if (kind === "save") {
           apply(await saveEdits(report));
           setMessage("教师修改已保存为新版本，原始模型与旧版报告保留。");
@@ -358,7 +363,7 @@ export function ReportPage() {
                   ? "教师编辑"
                   : report.origin === "teacher_adopted"
                     ? "已采纳助手建议"
-                    : report.options.use_llm === false
+                    : !hasModelAnalysis(report)
                       ? "已有证据整理"
                       : "AI辅助生成")
               : "未生成"}
@@ -442,7 +447,7 @@ export function ReportPage() {
               课迹 LessonTrace
             </span>
             <span>
-              {report?.product_scope?.classroom_name || "固定范式复盘"}
+              {report?.product_scope?.classroom_name || "课堂复盘"}
               {report?.product_scope?.subject_name
                 ? " · " + report.product_scope.subject_name
                 : ""}
@@ -463,7 +468,7 @@ export function ReportPage() {
                   disabled={busy || loading}
                   onClick={() => void task("rebuild")}
                 >
-                  按原范围重新整理证据
+                  按原范围重新生成报告
                 </button>
               )}
             </div>
@@ -471,6 +476,19 @@ export function ReportPage() {
             <div className="mt-4 space-y-6">
               <div className="space-y-1 text-xs text-[#6e5a74]">
                 <p>{report.scope_warning}</p>
+                {!hasModelAnalysis(report) && (
+                  <div className="space-y-2">
+                    <p role="status">{report.options.use_llm === false
+                      ? "此版由已保存的证据整理而成。"
+                      : "本次未取得有效的模型分析，当前显示已保存的证据摘要。"}</p>
+                    {s.canWrite && !editing && (
+                      <button type="button" className={btnClass("secondary", "sm") + " no-print"}
+                        disabled={busy || loading || s.restoring} onClick={() => void task("rebuild")}>
+                        用当前证据生成 AI 分析
+                      </button>
+                    )}
+                  </div>
+                )}
                 {report.generation?.status === "partial_success" && (
                   <p className="text-amber-700">
                     部分AI段落因引用不匹配未采纳，已保留有效内容。
@@ -502,7 +520,7 @@ export function ReportPage() {
                           <div key={block.block_id} data-block-id={block.block_id}
                             className="space-y-2 rounded-xl border border-[#e3bed8] bg-[#faf4f9] p-3.5 text-sm">
                             <div className="flex flex-wrap gap-x-2 text-xs font-semibold text-[#841f66]">
-                              <span>{versionLabel(block)}</span>
+                              <span>{versionLabel(block, report)}</span>
                               {block.actor && <span className="font-normal text-[#6e5a74]">{block.actor}</span>}
                             </div>
                             {editing ? (

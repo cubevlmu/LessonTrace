@@ -1,4 +1,4 @@
-"""Independent, fixed-format editable reports backed by current fusion evidence, never chat state."""
+"""Independent, evidence-guided editable reports backed by current fusion evidence, never chat state."""
 import json
 from typing import Literal
 from fastapi import Depends,Response,HTTPException,Query
@@ -112,7 +112,14 @@ def section_document(report,options):
         parts=groups.get(key,[]);text='\n\n'.join(p['text'] for p in parts);refs=list(dict.fromkeys(r for p in parts for r in p['evidence_refs'] if r in known))
         if key=='people' and 'statements' not in report:
             tracks=[e for e in report['evidence'] if e['evidence_type']=='person_track'];text=f'本次范围检索到{len(tracks)}条人物轨迹记录。轨迹数量不等于学生人数；局部、遮挡、重复候选及身份未确认的情况分别保留。';refs=[e['evidence_id'] for e in tracks]
-        if key=='scope' and options.angle!='student' and 'statements' not in report:text+=f'\n\n本次可引用的区域轨迹记录{len(visible)}条，其中有行为取证记录的轨迹{len(observed)}条；轨迹不是学生人数，未分析对象不计入行为结论。'
+        # Keep stable section keys for editing/adoption while displaying the
+        # writer's evidence-specific headings and omitting empty topics in views.
+        if parts and all(p.get('analysis_section') == key and '：' in p.get('heading','') for p in parts):
+            titles = [p['heading'].split('：',1)[1] for p in parts]
+            if len(parts) == 1:
+                title = titles[0]
+            else:
+                text = '\n\n'.join(f'{heading}\n{part["text"]}' for heading,part in zip(titles,parts))
         sections.append({'section_id':key,'heading':title,'content':text,'evidence_refs':refs})
     if report.get('statements'):
         # Current compatibility sections mirror these canonical model blocks.
@@ -121,7 +128,19 @@ def section_document(report,options):
                                'content':p['text'],'evidence_refs':[r for r in p['evidence_refs'] if r in known]},
                               1,None,statement_id=p['statement_id']) for p in report['statements']]
     else:
-        blocks=[section_block(section,1,None) for section in sections if section['content'].strip()]
+        blocks=[]
+        for section in sections:
+            if not section['content'].strip():
+                continue
+            parts=groups.get(section['section_id'],[])
+            if len(parts)>1 and all(p.get('content_kind')=='model_analysis_not_independent_fact' for p in parts):
+                for p in parts:
+                    heading=p['heading'].partition('：')[2]
+                    text=heading+'\n'+p['text'] if heading else p['text']
+                    blocks.append(section_block({**section,'content':text,'evidence_refs':p['evidence_refs']},
+                                                1,None,block_id='block_'+uid()))
+            else:
+                blocks.append(section_block(section,1,None))
     return {'blocks':blocks,'title':{'lesson':'课堂整体复盘报告','students':'全体学生观察报告','student':'学生个人复盘报告'}[options.angle],'angle':options.angle,'sections':sections,'adoptions':[],'analysis_coverage':coverage,'evidence':report['evidence'],'classroom':report['classroom'],'product_scope':report.get('product_scope'),'generation':report.get('narrative_generation'),'scope_warning':'仅覆盖实际分析范围，不能将未分析的人物与时段计入统计。','source_kind':'model_assisted_report_not_human_behavior_verification'}
 
 def mount(app,service,workflow,account,writer):
@@ -172,7 +191,7 @@ def mount(app,service,workflow,account,writer):
             doc['adoption_check_labels']=adoption_check_labels(service,base,doc,a['actor'])
         return doc
     def ask_request(options,draft=''):
-        return {'run_id':options.run_id,'question':'请按固定报告范式生成完整复盘，结合所有所选资料；'+options.focus,'report_template':options.angle,'report_context':draft,'roster_subject_id':options.roster_subject_id,'subject_id':options.subject_id,'track_id':options.track_id,'lesson_id':options.lesson_id,'start':options.start,'end':options.end,'document_ids':options.document_ids,'material_mode':options.material_mode,'use_classroom_memory':options.use_classroom_memory,'use_llm':options.use_llm,'allow_verification':False,'budget_seconds':180,'max_model_calls':2}
+        return {'run_id':options.run_id,'question':'请根据可引用的画面观察和资料原文撰写课堂复盘。按证据和关注点选择章节，指出可核查的具体发现与后续行动。教师关注点：'+options.focus,'report_template':options.angle,'report_context':draft,'roster_subject_id':options.roster_subject_id,'subject_id':options.subject_id,'track_id':options.track_id,'lesson_id':options.lesson_id,'start':options.start,'end':options.end,'document_ids':options.document_ids,'material_mode':options.material_mode,'use_classroom_memory':options.use_classroom_memory,'use_llm':options.use_llm,'allow_verification':False,'budget_seconds':180,'max_model_calls':2}
     def generate(options,a,prior=None,draft='',expected_version=None,preserved=None,preserved_adoptions=None):
         result=workflow.ask(ask_request(options,draft),a['actor'],is_privileged(a))
         if result['status']!='current':raise ValueError('report_sources_changed_during_generation')
@@ -218,7 +237,9 @@ def mount(app,service,workflow,account,writer):
             doc.pop('visible_sections',None)
             # Run-only v1 drafts retain their section-authoritative storage
             # format. The read adapter supplies blocks for those legacy rows.
-            if not options.lesson_id and not prior:
+            if not options.lesson_id and not prior and not any(
+                p.get('content_kind')=='model_analysis_not_independent_fact' for p in result.get('narrative',[])
+            ):
                 doc.pop('blocks',None)
             insert_version(c,rid,version,result['report_id'],'model_generated',a['actor'],doc,options.focus)
         serialized(service.repo,validate,publish)
@@ -394,7 +415,7 @@ def mount(app,service,workflow,account,writer):
         previous=load(rid,a,(r,v))
         if previous['status']!='current':raise HTTPException(409,'report_sources_stale')
         if body.version!=v['version']:raise HTTPException(409,'report_version_changed')
-        options=Generate.model_validate_json(r['options']).model_copy(update={'focus':body.instruction})
+        options=Generate.model_validate_json(r['options']).model_copy(update={'focus':body.instruction,'use_llm':True})
         current_refs={e['evidence_id'] for e in previous['evidence']}
         current=[b for section in previous['visible_sections'] for b in section['blocks']
                  if set(b['evidence_refs'])<=current_refs]

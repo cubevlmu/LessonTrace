@@ -20,6 +20,24 @@ def readable_action(text):
     return original
 
 
+def _fmt_sec(sec):
+    total = max(0, int(round(float(sec))))
+    m, s = divmod(total, 60)
+    h, m = divmod(m, 60)
+    return f'{h:02d}:{m:02d}:{s:02d}' if h else f'{m:02d}:{s:02d}'
+
+
+def _summarize_times(spans):
+    ordered = sorted(spans, key=lambda x: (x[0], x[1]))
+    labels = list(dict.fromkeys(
+        _fmt_sec(a) if round(a) == round(b) else f'{_fmt_sec(a)}–{_fmt_sec(b)}'
+        for a, b in ordered
+    ))
+    if len(labels) <= 3:
+        return '、'.join(labels)
+    return f'{labels[0]}、{labels[1]}、{labels[-1]}等（共 {len(ordered)} 次离散取证）'
+
+
 def observation_summary(claims,evidence,limit=3):
     cited={ref for claim in claims for ref in claim['evidence_refs']}
     rows=[];seen=set()
@@ -35,19 +53,22 @@ def observation_summary(claims,evidence,limit=3):
         if unavailable:text='该次取证未能看清目标行为，不能据此判断人物缺席'
         key=(text,tuple(e['time_scope']),e.get('subject_ref'),p.get('track_id'),p.get('segment_id'))
         if key in seen:continue
-        seen.add(key);t=e['time_scope'];when=f'{t[0]:g}秒' if t[0]==t[1] else f'{t[0]:g}–{t[1]:g}秒'
-        rows.append({'text':text,'time_label':when,'evidence_refs':[e['evidence_id']],'subject_ref':e.get('subject_ref'),
+        seen.add(key);t=e['time_scope'];when=_fmt_sec(t[0]) if round(t[0])==round(t[1]) else f'{_fmt_sec(t[0])}–{_fmt_sec(t[1])}'
+        rows.append({'text':text,'time_label':when,'_span':(float(t[0]),float(t[1])),'evidence_refs':[e['evidence_id']],'subject_ref':e.get('subject_ref'),
             'source_label':'AI画面记录','recognition_state':text,'reliability':'中' if e['verification_status']=='supported' else '低',
             'reliability_basis':'模型与证据检查提示，不是实测准确率。','verification_status':e['verification_status'],'observation_available':not unavailable,'track_scope':p.get('track_id'),'segment_scope':p.get('segment_id')})
     grouped={}
     for row in rows:
         key=(row['text'],row['subject_ref'],row['track_scope'],row['segment_scope'])
-        current=grouped.setdefault(key,{**row,'observed_times':[],'evidence_refs':[]})
-        current['observed_times'].append(row['time_label']);current['evidence_refs']+=row['evidence_refs']
+        current=grouped.setdefault(key,{**row,'observed_times':[],'_spans':[],'evidence_refs':[]})
+        current['observed_times'].append(row['time_label']);current['_spans'].append(row['_span']);current['evidence_refs']+=row['evidence_refs']
     result=[]
     for row in grouped.values():
-        row['observed_times']=list(dict.fromkeys(row['observed_times']));row['sample_count']=len(row['observed_times'])
-        row['time_label']='、'.join(row['observed_times']);row['evidence_refs']=list(dict.fromkeys(row['evidence_refs']))
+        spans=row.pop('_spans',[])
+        row.pop('_span',None)
+        row['observed_times']=list(dict.fromkeys(row['observed_times']));row['sample_count']=len(spans)
+        row['time_label']=_summarize_times(spans)
+        row['evidence_refs']=list(dict.fromkeys(row['evidence_refs']))
         row['observation_basis']='多时刻观察' if row['sample_count']>1 else '单次画面观察'
         row['classification_note']='行为类别与执行者仍需按各条原始裁决核对；多次观察不是校准准确率。'
         result.append(row)
